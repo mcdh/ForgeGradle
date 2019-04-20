@@ -10,12 +10,11 @@ if (project.hasProperty("push_release")) {
 		throw new IllegalArgumentException('Can not push a release without specifying a build number in $BUILD_NUMBER')
 	version = '1.2.0.' + System.env.BUILD_NUMBER
 } else {
-	version = '1.2-SNAPSHOT'
+	version = '1.2-CUSTOM'
 }
 	
 archivesBaseName = 'ForgeGradle'
-targetCompatibility = '1.6'
-sourceCompatibility = '1.6'
+targetCompatibility = sourceCompatibility = '1.8'
 
 repositories {
     mavenLocal()
@@ -80,6 +79,7 @@ dependencies {
     compile 'de.oceanlabs.mcp:RetroGuard:3.6.6'
     compile 'de.oceanlabs.mcp:mcinjector:3.2-SNAPSHOT'
     compile 'net.minecraftforge.srg2source:Srg2Source:3.2-SNAPSHOT'
+    compile 'com.github.stephenc.high-scale-lib:high-scale-lib:1.1.4'
 
     // stupid maven
     deployerJars "org.apache.maven.wagon:wagon-ssh:2.2"

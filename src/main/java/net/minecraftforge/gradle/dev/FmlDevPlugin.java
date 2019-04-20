@@ -36,6 +36,8 @@ import net.minecraftforge.gradle.tasks.dev.SubprojectTask;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
+import org.gradle.api.artifacts.ConfigurationContainer;
+import org.gradle.api.artifacts.UnknownConfigurationException;
 import org.gradle.api.file.DuplicatesStrategy;
 import org.gradle.api.java.archives.Manifest;
 import org.gradle.api.tasks.Copy;
@@ -168,7 +170,7 @@ public class FmlDevPlugin extends DevBasePlugin
 
         Copy copy = makeTask("copyStart", Copy.class);
         {
-            copy.from(delayedFile("{FML_CONF_DIR}/patches"));
+            copy.from(delayedFile("{FML_CONF_DIR}/patchDir"));
             copy.include("Start.java");
             copy.into(delayedFile(DevConstants.ECLIPSE_CLEAN_SRC));
             copy.dependsOn("extractMcResources");
@@ -372,8 +374,18 @@ public class FmlDevPlugin extends DevBasePlugin
             makeChangelog.setOutput(delayedFile(DevConstants.CHANGELOG));
         }
 
+
+
         final DelayedJar uni = makeTask("packageUniversal", DelayedJar.class);
         {
+            try {
+                final ConfigurationContainer container = project.getConfigurations();
+                container
+                 .getByName("deployJars")
+                 .getFiles()
+                 .forEach(file -> uni.from(file.isDirectory() ? file : delayedZipTree(file.getAbsolutePath())));
+            } catch(UnknownConfigurationException e) {}
+
             uni.setClassifier("universal");
             uni.getInputs().file(delayedFile(DevConstants.JSON_REL));
             uni.getOutputs().upToDateWhen(Constants.CALL_FALSE);
@@ -464,6 +476,7 @@ public class FmlDevPlugin extends DevBasePlugin
             range.setLibsFromProject(delayedFile(DevConstants.ECLIPSE_FML + "/build.gradle"), "compile", true);
             range.addIn(delayedFile(DevConstants.FML_SOURCES));
             range.setRangeMap(delayedFile(DevConstants.USERDEV_RANGEMAP));
+//            range.dependsOn("generateProjects", "extractFmlSources");
             range.dependsOn("generateProjects", "extractFmlSources");
         }
 
@@ -514,7 +527,7 @@ public class FmlDevPlugin extends DevBasePlugin
             userDev.from(delayedFileTree("{FML_CONF_DIR}"), new CopyInto("conf", "astyle.cfg", "exceptor.json", "*.csv", "!packages.csv"));
             userDev.from(delayedFile(DevConstants.NOTCH_2_SRG_SRG), new CopyInto("conf"));
             userDev.from(delayedFile(DevConstants.SRG_EXC), new CopyInto("conf"));
-            userDev.from(delayedFileTree("{FML_CONF_DIR}/patches"), new CopyInto("conf"));
+            userDev.from(delayedFileTree("{FML_CONF_DIR}/patchDir"), new CopyInto("conf"));
             userDev.rename(".+-dev\\.json", "dev.json");
             userDev.rename(".+?\\.srg", "packaged.srg");
             userDev.rename(".+?\\.exc", "packaged.exc");
@@ -522,6 +535,21 @@ public class FmlDevPlugin extends DevBasePlugin
             uni.setDuplicatesStrategy(DuplicatesStrategy.EXCLUDE);
             userDev.dependsOn("packageUniversal", crowdin, patchZip, classZip, "createVersionProperties", s2s);
             userDev.setExtension("jar");
+
+            try {
+                final ConfigurationContainer container = project.getConfigurations();
+                container
+                 .getByName("userDev")
+                 .getFiles()
+                 .forEach(file -> {
+                     if (file.isDirectory()) {
+                         userDev.from(file, new CopyInto("src/main/java"));
+                     } else {
+                         userDev.from(delayedZipTree(file.getAbsolutePath()), new CopyInto("src/main/java"));
+                     }
+                     userDev.exclude("src/main/java/META-INF");
+                 });
+            } catch (UnknownConfigurationException e) {}
         }
         project.getArtifacts().add("archives", userDev);
 

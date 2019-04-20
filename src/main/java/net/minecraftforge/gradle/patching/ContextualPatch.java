@@ -54,7 +54,7 @@ import java.util.regex.Pattern;
 /**
  * STOLEN FROM diff4j v1.1
  *
- * Applies contextual patches to files. The patch file can contain patches for multiple files.
+ * Applies contextual patchDir to files. The patch file can contain patchDir for multiple files.
  *
  * @author Maros Sandor
  */
@@ -1101,7 +1101,7 @@ public final class ContextualPatch
         //boolean targetMustExist = true;     // == false if the patch contains one hunk with just additions ('+' lines)
         File targetFile;                 // computed later
         boolean noEndingNewline;            // resulting file should not end with a newline
-        boolean binary;                  // binary patches contain one encoded Hunk
+        boolean binary;                  // binary patchDir contain one encoded Hunk
         Mode mode;
     }
 

@@ -141,7 +141,7 @@ public class ReobfExceptor
             }
             catch (FileNotFoundException e)
             {
-                throw new FileNotFoundException("Could not open input file: " + e.getMessage());
+                throw new FileNotFoundException("Could not open target file: " + e.getMessage());
             }
             
             JarInfo reader = new JarInfo();

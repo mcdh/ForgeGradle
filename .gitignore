@@ -1,7 +1,14 @@
 # gradle
-.gradle
+.gradle/
 build
 gradle-app.setting
+
+# IntelliJ
+*.ipr
+*.iml
+*.iws
+.idea/
+
 
 # GMCP plugin
 /minecraft

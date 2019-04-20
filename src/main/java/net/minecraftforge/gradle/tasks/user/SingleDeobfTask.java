@@ -31,7 +31,7 @@ public class SingleDeobfTask extends CachedTask
     @InputFile
     private DelayedFile  srg;
 
-    // getter is marked for input files
+    // getter is marked for target files
     private List<Object> classpath = new ArrayList<Object>(5);
 
     @Cached

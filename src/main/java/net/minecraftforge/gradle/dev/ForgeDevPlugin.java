@@ -123,7 +123,7 @@ public class ForgeDevPlugin extends DevBasePlugin
         {
             task4.setInJar(delayedFile(ZIP_DECOMP_FORGE));
             task4.setOutJar(delayedFile(ZIP_FMLED_FORGE));
-            task4.addStage("fml", delayedFile(FML_PATCH_DIR), delayedFile(FML_SOURCES), delayedFile(FML_RESOURCES), delayedFile("{FML_CONF_DIR}/patches/Start.java"), delayedFile(DEOBF_DATA), delayedFile(FML_VERSIONF));
+            task4.addStage("fml", delayedFile(FML_PATCH_DIR), delayedFile(FML_SOURCES), delayedFile(FML_RESOURCES), delayedFile("{FML_CONF_DIR}/patchDir/Start.java"), delayedFile(DEOBF_DATA), delayedFile(FML_VERSIONF));
             task4.setDoesCache(false);
             task4.setMaxFuzz(2);
             task4.dependsOn("decompile", "compressDeobfData", "createVersionPropertiesFML");
@@ -646,7 +646,7 @@ public class ForgeDevPlugin extends DevBasePlugin
             userDev.from(delayedZipTree(DevConstants.USERDEV_SRG_SRC), new CopyInto("src/main/java"));
             userDev.from(delayedFile(DEOBF_DATA), new CopyInto("src/main/resources/"));
             userDev.from(delayedFileTree("{FML_CONF_DIR}"), new CopyInto("conf", "astyle.cfg", "exceptor.json", "*.csv", "!packages.csv"));
-            userDev.from(delayedFileTree("{FML_CONF_DIR}/patches"), new CopyInto("conf"));
+            userDev.from(delayedFileTree("{FML_CONF_DIR}/patchDir"), new CopyInto("conf"));
             userDev.from(delayedFile(MERGE_CFG), new CopyInto("conf"));
             userDev.from(delayedFile(NOTCH_2_SRG_SRG), new CopyInto("conf"));
             userDev.from(delayedFile(SRG_EXC), new CopyInto("conf"));
@@ -658,6 +658,18 @@ public class ForgeDevPlugin extends DevBasePlugin
             uni.setDuplicatesStrategy(DuplicatesStrategy.EXCLUDE);
             userDev.dependsOn(uni, patchZipFML, patchZipForge, classZip, "createVersionPropertiesFML", s2s);
             userDev.setExtension("jar");
+            project
+             .getConfigurations()
+             .getByName("userDev")
+             .getFiles()
+             .forEach(file -> {
+                 if (file.isDirectory()) {
+                     userDev.from(file, new CopyInto("src/main/java"));
+                 } else {
+                     userDev.from(delayedZipTree(file.getAbsolutePath()), new CopyInto("src/main/java"));
+                 }
+                 userDev.exclude("src/main/java/META-INF");
+             });
         }
         project.getArtifacts().add("archives", userDev);
 

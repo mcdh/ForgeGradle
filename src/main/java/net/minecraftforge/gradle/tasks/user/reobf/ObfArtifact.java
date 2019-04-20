@@ -410,7 +410,7 @@ public class ObfArtifact extends AbstractPublishArtifact
             ZipOutputStream out = new ZipOutputStream(new FileOutputStream(packedJar));
             ZipEntry entry = null;
 
-            // pack input jar
+            // pack target jar
             ZipInputStream in = new ZipInputStream(new FileInputStream(input));
             while ((entry = in.getNextEntry()) != null)
             {
@@ -506,7 +506,7 @@ public class ObfArtifact extends AbstractPublishArtifact
             ZipOutputStream out = new ZipOutputStream(new FileOutputStream(output));
             ZipEntry entry = null;
 
-            // pack input jar
+            // pack target jar
             ZipInputStream in = new ZipInputStream(new FileInputStream(outPackedJar));
             while ((entry = in.getNextEntry()) != null)
             {

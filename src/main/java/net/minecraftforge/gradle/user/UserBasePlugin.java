@@ -346,8 +346,8 @@ public abstract class UserBasePlugin<T extends UserExtension> extends BasePlugin
         SourceSet api = javaConv.getSourceSets().create("api");
 
         // set the Source
-        javaConv.setSourceCompatibility("1.6");
-        javaConv.setTargetCompatibility("1.6");
+        javaConv.setSourceCompatibility("1.8");
+        javaConv.setTargetCompatibility("1.8");
 
         main.setCompileClasspath(main.getCompileClasspath().plus(api.getOutput()));
         test.setCompileClasspath(test.getCompileClasspath().plus(api.getOutput()));
@@ -762,8 +762,8 @@ public abstract class UserBasePlugin<T extends UserExtension> extends BasePlugin
         JavaCompile recompTask = makeTask("recompMinecraft", JavaCompile.class);
         {
             recompTask.setSource(recompSrc);
-            recompTask.setSourceCompatibility("1.6");
-            recompTask.setTargetCompatibility("1.6");
+            recompTask.setSourceCompatibility("1.8");
+            recompTask.setTargetCompatibility("1.8");
             recompTask.setClasspath(project.getConfigurations().getByName(CONFIG_DEPS));
             recompTask.dependsOn(extract);
             recompTask.getOptions().setWarnings(false);

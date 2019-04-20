@@ -70,11 +70,17 @@ public class DecompileTask extends CachedTask
     @Cached
     private DelayedFile outJar;
 
+    private boolean shouldPatch = true;
+
     private HashMap<String, String> sourceMap   = new HashMap<String, String>();
     private HashMap<String, byte[]> resourceMap = new HashMap<String, byte[]>();
 
     private static final Pattern BEFORE = Pattern.compile("(?m)((case|default).+(?:\\r\\n|\\r|\\n))(?:\\r\\n|\\r|\\n)");
     private static final Pattern AFTER  = Pattern.compile("(?m)(?:\\r\\n|\\r|\\n)((?:\\r\\n|\\r|\\n)[ \\t]+(case|default))");
+
+    public void setShouldPatch(final boolean b) {
+        this.shouldPatch = b;
+    }
 
     /**
      * This method outputs to the cleanSrc
@@ -94,21 +100,19 @@ public class DecompileTask extends CachedTask
 
         saveJar(new File(getTemporaryDir(), getInJar().getName() + ".fixed.jar"));
 
-        getLogger().info("Applying MCP patches");
-        if (getPatch().isFile())
-        {
-            applySingleMcpPatch(getPatch());
+        if (shouldPatch) {
+            getLogger().info("Applying MCP patchDir");
+            if (getPatch().isFile()) {
+                applySingleMcpPatch(getPatch());
+            } else {
+                applyPatchDirectory(getPatch());
+            }
+
+            saveJar(new File(getTemporaryDir(), getInJar().getName() + ".patched.jar"));
+
+            getLogger().info("Cleaning source");
+            applyMcpCleanup(getAstyleConfig());
         }
-        else
-        {
-            applyPatchDirectory(getPatch());
-        }
-
-        saveJar(new File(getTemporaryDir(), getInJar().getName() + ".patched.jar"));
-
-        getLogger().info("Cleaning source");
-        applyMcpCleanup(getAstyleConfig());
-
         getLogger().info("Saving Jar");
         saveJar(getOutJar());
     }
@@ -215,7 +219,7 @@ public class DecompileTask extends CachedTask
 
                 throw report.getFailure();
             }
-            else if (report.getStatus() == PatchStatus.Fuzzed) // catch fuzzed patches
+            else if (report.getStatus() == PatchStatus.Fuzzed) // catch fuzzed patchDir
             {
                 getLogger().log(LogLevel.INFO, "Patching fuzzed: " + report.getTarget(), report.getFailure());
                 fuzzed = true;

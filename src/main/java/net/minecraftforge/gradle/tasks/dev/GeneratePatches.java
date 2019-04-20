@@ -59,9 +59,9 @@ public class GeneratePatches extends DefaultTask
         created.clear();
         getPatchDir().mkdirs();
 
-        // fix and create patches.
+        // fix and create patchDir.
         processFiles(getSupplier(original.call()), getSupplier(changed.call()));
-        
+
         removeOld(getPatchDir());
     }
 
@@ -161,8 +161,17 @@ public class GeneratePatches extends DefaultTask
 
         Diff diff = Diff.diff(new InputStreamReader(new ByteArrayInputStream(oData), Charsets.UTF_8), new InputStreamReader(new ByteArrayInputStream(cData), Charsets.UTF_8), false);
 
-        if (!relative.startsWith("/"))
-            relative = "/" + relative;
+//        if (!relative.startsWith("/")) {
+//                relative = "/" + relative;
+//        }
+
+        if (originalPrefix != null && !originalPrefix.equals("")) {
+            originalPrefix = "/" + originalPrefix;
+        }
+
+        if (changedPrefix != null && !changedPrefix.equals("")) {
+            changedPrefix = "/" + changedPrefix;
+        }
 
         if (!diff.isEmpty())
         {

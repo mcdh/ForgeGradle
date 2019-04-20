@@ -147,7 +147,7 @@ public class MergeJarsTask extends CachedTask
             }
             catch (FileNotFoundException e)
             {
-                throw new FileNotFoundException("Could not open input file: " + e.getMessage());
+                throw new FileNotFoundException("Could not open target file: " + e.getMessage());
             }
 
             // different messages.

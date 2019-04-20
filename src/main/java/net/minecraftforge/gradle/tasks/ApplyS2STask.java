@@ -65,7 +65,7 @@ public class ApplyS2STask extends DefaultTask
         InputSupplier inSup;
 
         if (ins.size() == 0)
-            return; // no input.
+            return; // no target.
         else if (ins.size() == 1)
         {
             // just 1 supplier.

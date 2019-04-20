@@ -9,15 +9,16 @@ import java.util.Map.Entry;
 import net.minecraftforge.gradle.common.BaseExtension;
 
 import com.google.common.base.Strings;
+import net.minecraftforge.gradle.common.BasePlugin;
 
 public class UserExtension extends BaseExtension
 {
-    public transient UserBasePlugin<? extends UserExtension> plugin;
+    public transient BasePlugin<? extends UserExtension> plugin;
     private HashMap<String, Object> replacements = new HashMap<String, Object>();
     private ArrayList<String> includes = new ArrayList<String>();
     private boolean isDecomp = false;
 
-    public UserExtension(UserBasePlugin<? extends UserExtension> plugin)
+    public UserExtension(BasePlugin<? extends UserExtension> plugin)
     {
         super(plugin);
         this.plugin = plugin;

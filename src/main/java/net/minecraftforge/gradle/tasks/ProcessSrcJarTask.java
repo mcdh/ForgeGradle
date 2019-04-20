@@ -74,7 +74,7 @@ public class ProcessSrcJarTask extends EditJarTask
             
             if (stage.patchDir != null)
             {
-                getLogger().lifecycle("Applying {} patches", stage.name);
+                getLogger().lifecycle("Applying {} patchDir", stage.name);
                 applyPatchStage(stage.name, stage.getPatchFiles());
             }
         }
@@ -82,12 +82,12 @@ public class ProcessSrcJarTask extends EditJarTask
 
     public void applyPatchStage(String stage, FileCollection patchFiles) throws Exception
     {
-        getLogger().info("Reading patches for stage {}", stage);
+        getLogger().info("Reading patchDir for stage {}", stage);
         ArrayList<PatchedFile> patches = readPatches(patchFiles);
 
         boolean fuzzed = false;
 
-        getLogger().info("Applying patches for stage {}", stage);
+        getLogger().info("Applying patchDir for stage {}", stage);
 
         Throwable failure = null;
 
@@ -96,7 +96,7 @@ public class ProcessSrcJarTask extends EditJarTask
             List<ContextualPatch.PatchReport> errors = patch.patch.patch(false);
             for (ContextualPatch.PatchReport report : errors)
             {
-                // catch failed patches
+                // catch failed patchDir
                 if (!report.getStatus().isSuccess())
                 {
                     File reject = patch.makeRejectFile();
@@ -129,7 +129,7 @@ public class ProcessSrcJarTask extends EditJarTask
                     if (failure == null)
                         failure = report.getFailure();
                 }
-                // catch fuzzed patches
+                // catch fuzzed patchDir
                 else if (report.getStatus() == ContextualPatch.PatchStatus.Fuzzed)
                 {
                     getLogger().log(LogLevel.INFO, "Patching fuzzed: {}", PROVIDER.strip(report.getTarget()));
@@ -151,7 +151,7 @@ public class ProcessSrcJarTask extends EditJarTask
                         failure = report.getFailure();
                 }
 
-                // sucesful patches
+                // sucesful patchDir
                 else
                 {
                     getLogger().info("Patch succeeded: {}", PROVIDER.strip(report.getTarget()));

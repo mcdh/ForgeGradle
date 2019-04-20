@@ -55,7 +55,7 @@ public class ApplyBinPatchesTask extends CachedTask
     DelayedFile outJar;
 
     @InputFile
-    DelayedFile patches;  // this will be a patches.lzma
+    DelayedFile patches;  // this will be a patchDir.lzma
 
     @InputFiles
     DelayedFileTree resources;
@@ -77,7 +77,7 @@ public class ApplyBinPatchesTask extends CachedTask
         ZipInputStream classesIn = new ZipInputStream(new FileInputStream(getClassesJar()));
         final ZipOutputStream out = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(getOutJar())));
         final HashSet<String> entries = new HashSet<String>();
-        
+
         try
         {
             // DO PATCHES
@@ -86,7 +86,7 @@ public class ApplyBinPatchesTask extends CachedTask
             {
                 if (e.getName().contains("META-INF"))
                     continue;
-                
+
                 if (e.isDirectory())
                 {
                     out.putNextEntry(e);
@@ -96,38 +96,38 @@ public class ApplyBinPatchesTask extends CachedTask
                     ZipEntry n = new ZipEntry(e.getName());
                     n.setTime(e.getTime());
                     out.putNextEntry(n);
-    
+
                     byte[] data = ByteStreams.toByteArray(in.getInputStream(e));
                     ClassPatch patch = patchlist.get(e.getName().replace('\\', '/'));
-    
+
                     if (patch != null)
                     {
-                        log("\t%s (%s) (input size %d)", patch.targetClassName, patch.sourceClassName, data.length);
+                        log("\t%s (%s) (target size %d)", patch.targetClassName, patch.sourceClassName, data.length);
                         int inputChecksum = adlerHash(data);
                         if (patch.inputChecksum != inputChecksum)
                         {
-                            throw new RuntimeException(String.format("There is a binary discrepency between the expected input class %s (%s) and the actual class. Checksum on disk is %x, in patch %x. Things are probably about to go very wrong. Did you put something into the jar file?", patch.targetClassName, patch.sourceClassName, inputChecksum, patch.inputChecksum));
+                            throw new RuntimeException(String.format("There is a binary discrepency between the expected target class %s (%s) and the actual class. Checksum on disk is %x, in patch %x. Things are probably about to go very wrong. Did you put something into the jar file?", patch.targetClassName, patch.sourceClassName, inputChecksum, patch.inputChecksum));
                         }
                         synchronized (patcher)
                         {
                             data = patcher.patch(data, patch.patch);
                         }
                     }
-    
+
                     out.write(data);
                 }
-                
+
                 // add the names to the hashset
                 entries.add(e.getName());
             }
-            
+
             // COPY DATA
             ZipEntry entry = null;
             while ((entry = classesIn.getNextEntry()) != null)
             {
                 if (entries.contains(entry.getName()))
                     continue;
-                
+
                 out.putNextEntry(entry);
                 out.write(ByteStreams.toByteArray(classesIn));
                 entries.add(entry.getName());
@@ -150,13 +150,13 @@ public class ApplyBinPatchesTask extends CachedTask
                             ByteStreams.copy(file.open(), out);
                             entries.add(name);
                         }
-                    } 
+                    }
                     catch (IOException e)
                     {
                         Throwables.propagateIfPossible(e);
                     }
                 }
-                
+
             });
         }
         finally
@@ -217,7 +217,7 @@ public class ApplyBinPatchesTask extends CachedTask
             {
             }
         } while (true);
-        log("Read %d binary patches", patchlist.size());
+        log("Read %d binary patchDir", patchlist.size());
         log("Patch list :\n\t%s", Joiner.on("\n\t").join(patchlist.entrySet()));
     }
 

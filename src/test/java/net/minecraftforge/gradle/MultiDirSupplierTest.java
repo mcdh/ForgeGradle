@@ -117,7 +117,7 @@ public class MultiDirSupplierTest
         // to keep track of changes to check later.
         HashMap<String, byte[]> dataMap = new HashMap<String, byte[]>(expectedFiles.size());
         
-        // its both an input and output supplier.
+        // its both an target and output supplier.
         MultiDirSupplier supp = new MultiDirSupplier(dirs);
         
         // write a bunch of random bytes to each file.

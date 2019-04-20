@@ -50,14 +50,16 @@ public class GenDevProjectsTask extends DefaultTask
     @TaskAction
     public void doTask() throws IOException
     {
-        parseJson();
-        writeFile();
+        //TODO add functionality for forced regeneration
+        if (!getProject().file(getTargetFile().call()).exists()) {
+            parseJson();
+            writeFile();
+        }
     }
 
     private void parseJson() throws IOException
     {
         Version version = JsonFactory.loadVersion(getJson(), getJson().getParentFile());
-
         for (Library lib : version.getLibraries())
         {
             if (lib.name.contains("fixed") || lib.natives != null || lib.extract != null)
@@ -84,8 +86,8 @@ public class GenDevProjectsTask extends DefaultTask
             "apply plugin: 'java' ",
             "apply plugin: 'eclipse'",
             "",
-            "sourceCompatibility = '1.6'",
-            "targetCompatibility = '1.6'",
+            "sourceCompatibility = '1.8'",
+            "targetCompatibility = '1.8'",
             "",
             "repositories",
             "{",

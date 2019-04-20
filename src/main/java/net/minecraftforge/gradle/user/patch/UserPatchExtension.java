@@ -3,7 +3,9 @@ package net.minecraftforge.gradle.user.patch;
 import java.util.ArrayList;
 import java.util.List;
 
+import net.minecraftforge.gradle.common.BasePlugin;
 import net.minecraftforge.gradle.delayed.DelayedObject;
+import net.minecraftforge.gradle.user.UserBasePlugin;
 import net.minecraftforge.gradle.user.UserExtension;
 
 import org.gradle.api.ProjectConfigurationException;
@@ -15,7 +17,7 @@ public class UserPatchExtension extends UserExtension
     private String apiVersion;
     private ArrayList<Object> ats = new ArrayList<Object>();
 
-    public UserPatchExtension(UserPatchBasePlugin plugin)
+    public <T extends UserExtension> UserPatchExtension(BasePlugin<T> plugin)
     {
         super(plugin);
     }
@@ -112,9 +114,9 @@ public class UserPatchExtension extends UserExtension
          *     Input: 14.23.5.1
          *     Output: 1.12.2-14.23.5.2811
          *   Solution:
-         *     Again, can be solved using maven-metadata.xml, use Apache's ArtifactVersion library to parse out a easy comparable version for everything in the metadata, and the version the user input.
-         *     Set MinVersion = ArtifactVersion(input)
-         *     prefix = input.substring(0, input.lastIndexOf('.'))
+         *     Again, can be solved using maven-metadata.xml, use Apache's ArtifactVersion library to parse out a easy comparable version for everything in the metadata, and the version the user target.
+         *     Set MinVersion = ArtifactVersion(target)
+         *     prefix = target.substring(0, target.lastIndexOf('.'))
          *     MaxVersion = ArtifactVersion(prefix.rsplit('.', 1)[0] + '.' + (int(prefix.rsplit('.', 1)[1]) + 1))
          *
          *     Then find the max version that fits: MinVersion <= Version < MaxVersion

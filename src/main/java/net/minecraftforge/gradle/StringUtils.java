@@ -79,7 +79,7 @@ public final class StringUtils
      * @param ignoreEmptyTokens omit empty tokens from the result array
      *            (only applies to tokens that are empty after trimming; StringTokenizer
      *            will not consider subsequent delimiters as token in the first place).
-     * @return an array of the tokens (<code>null</code> if the input String
+     * @return an array of the tokens (<code>null</code> if the target String
      *         was <code>null</code>)
      * @see java.util.StringTokenizer
      * @see java.lang.String#trim()
