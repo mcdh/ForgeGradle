@@ -80,7 +80,8 @@ dependencies {
     compile 'de.oceanlabs.mcp:mcinjector:3.2-SNAPSHOT'
     compile 'net.minecraftforge.srg2source:Srg2Source:3.2-SNAPSHOT'
     compile 'com.github.stephenc.high-scale-lib:high-scale-lib:1.1.4'
-
+    compile 'org.mcdh:jda:0.0.1'
+    
     // stupid maven
     deployerJars "org.apache.maven.wagon:wagon-ssh:2.2"
     
