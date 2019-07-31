@@ -110,7 +110,7 @@ public class GenBinaryPatches extends DefaultTask
 
     private void addInnerClasses(String parent, Set<String> patchList)
     {
-        // Recursively add inner classes to the list of patchDir - this will mean we ship anything affected by "access$" changes
+        // Recursively add inner classes to the list of patches - this will mean we ship anything affected by "access$" changes
         for (String inner : innerClasses.get(parent))
         {
             patchList.add(srgMapping.get(inner));

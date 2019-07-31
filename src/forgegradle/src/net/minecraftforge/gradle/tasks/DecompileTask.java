@@ -101,7 +101,7 @@ public class DecompileTask extends CachedTask
         saveJar(new File(getTemporaryDir(), getInJar().getName() + ".fixed.jar"));
 
         if (shouldPatch) {
-            getLogger().info("Applying MCP patchDir");
+            getLogger().info("Applying MCP patches");
             if (getPatch().isFile()) {
                 applySingleMcpPatch(getPatch());
             } else {
@@ -219,7 +219,7 @@ public class DecompileTask extends CachedTask
 
                 throw report.getFailure();
             }
-            else if (report.getStatus() == PatchStatus.Fuzzed) // catch fuzzed patchDir
+            else if (report.getStatus() == PatchStatus.Fuzzed) // catch fuzzed patches
             {
                 getLogger().log(LogLevel.INFO, "Patching fuzzed: " + report.getTarget(), report.getFailure());
                 fuzzed = true;

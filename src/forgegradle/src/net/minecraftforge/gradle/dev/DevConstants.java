@@ -42,8 +42,8 @@ final class DevConstants
     static final String JOINED_EXC          = "{FML_CONF_DIR}/joined.exc";
     static final String ASTYLE_CFG          = "{FML_CONF_DIR}/astyle.cfg";
     static final String EXC_JSON            = "{FML_CONF_DIR}/exceptor.json";
-    static final String MCP_PATCH           = "{FML_CONF_DIR}/patchDir/minecraft_ff.patch";
-    static final String MCP_PATCH_DIR       = "{FML_CONF_DIR}/patchDir/minecraft_ff";
+    static final String MCP_PATCH           = "{FML_CONF_DIR}/patches/minecraft_ff.patch";
+    static final String MCP_PATCH_DIR       = "{FML_CONF_DIR}/patches/minecraft_ff";
     static final String MERGE_CFG           = "{FML_DIR}/mcp_merge.cfg";
 
     // jars.
@@ -119,7 +119,7 @@ final class DevConstants
     static final String ECLIPSE_ASSETS      = ECLIPSE_RUN + "/assets";
 
     // FML stuff only...
-    static final String FML_PATCH_DIR       = "{FML_DIR}/patchDir/minecraft";
+    static final String FML_PATCH_DIR       = "{FML_DIR}/patches/minecraft";
     static final String FML_SOURCES         = "{FML_DIR}/src/main/java";
     static final String FML_RESOURCES       = "{FML_DIR}/src/main/resources";
     static final String FML_TEST_SOURCES    = "{FML_DIR}/src/test/java";
@@ -130,7 +130,7 @@ final class DevConstants
     static final String FML_LOGO            = "{FML_DIR}/jsons/big_logo.png";
 
     // Forge stuff only
-    static final String FORGE_PATCH_DIR     = "{FORGE_DIR}/patchDir/minecraft";
+    static final String FORGE_PATCH_DIR     = "{FORGE_DIR}/patches/minecraft";
     static final String FORGE_SOURCES       = "{FORGE_DIR}/src/main/java";
     static final String FORGE_RESOURCES     = "{FORGE_DIR}/src/main/resources";
     static final String FORGE_TEST_SOURCES  = "{FORGE_DIR}/src/test/java";
@@ -143,7 +143,7 @@ final class DevConstants
     static final String FORGE_VERSION_JAVA  = FORGE_SOURCES + "/net/minecraftforge/common/ForgeVersion.java";
 
     // Extra stuff only, for the current project
-    static final String EXTRA_PATCH_DIR      = "patchDir";
+    static final String EXTRA_PATCH_DIR      = "patches";
     static final String EXTRA_SOURCES        = "src/main/java";
     static final String EXTRA_RESOURCES      = "src/main/resources";
     static final String EXTRA_TEST_SOURCES   = "src/test/java";

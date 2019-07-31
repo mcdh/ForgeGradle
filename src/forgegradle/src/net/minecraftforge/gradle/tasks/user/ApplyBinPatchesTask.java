@@ -55,7 +55,7 @@ public class ApplyBinPatchesTask extends CachedTask
     DelayedFile outJar;
 
     @InputFile
-    DelayedFile patches;  // this will be a patchDir.lzma
+    DelayedFile patches;  // this will be a patches.lzma
 
     @InputFiles
     DelayedFileTree resources;
@@ -217,7 +217,7 @@ public class ApplyBinPatchesTask extends CachedTask
             {
             }
         } while (true);
-        log("Read %d binary patchDir", patchlist.size());
+        log("Read %d binary patches", patchlist.size());
         log("Patch list :\n\t%s", Joiner.on("\n\t").join(patchlist.entrySet()));
     }
 

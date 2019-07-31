@@ -21,11 +21,14 @@ import net.minecraftforge.gradle.tasks.user.reobf.ArtifactSpec;
 import net.minecraftforge.gradle.tasks.user.reobf.ReobfTask;
 import net.minecraftforge.gradle.user.UserConstants;
 import net.minecraftforge.gradle.user.patch.UserPatchExtension;
+import org.apache.maven.plugin.PluginConfigurationException;
 import org.apache.tools.ant.types.Commandline;
 import org.gradle.api.*;
 import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.dsl.DependencyHandler;
 import org.gradle.api.execution.TaskExecutionGraph;
+import org.gradle.api.initialization.dsl.ScriptHandler;
 import org.gradle.api.internal.ConventionTask;
 import org.gradle.api.internal.plugins.DslObject;
 import org.gradle.api.logging.Logger;
@@ -38,6 +41,7 @@ import org.gradle.api.tasks.compile.CompileOptions;
 import org.gradle.api.tasks.compile.GroovyCompile;
 import org.gradle.api.tasks.compile.JavaCompile;
 import org.gradle.api.tasks.scala.ScalaCompile;
+import org.gradle.execution.commandline.TaskConfigurationException;
 import org.gradle.plugins.ide.idea.model.IdeaModel;
 import org.w3c.dom.DOMException;
 import org.w3c.dom.Document;
@@ -57,6 +61,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static net.minecraftforge.gradle.common.Constants.*;
 import static net.minecraftforge.gradle.user.UserConstants.*;
@@ -73,7 +78,7 @@ import static net.minecraftforge.gradle.user.patch.UserPatchConstants.JSON;
 import static net.minecraftforge.gradle.user.patch.UserPatchConstants.RES_DIR;
 import static net.minecraftforge.gradle.user.patch.UserPatchConstants.START_DIR;
 
-@SuppressWarnings({"serial", "unchecked", "unsafe", "rawtypes"})
+@SuppressWarnings({"serial", "unchecked", "unsafe", "rawtypes", "Duplicates"})
 public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
  public static class ModRev {
   public Object
@@ -84,15 +89,38 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    fieldCsv = null,
    methodCsv = null;
 
-  //TODO
-//  public SourceSet src;
-  public Object srcDir;
+  public Object
+   srcDir,
+   resDir,
+   targets;
  }
 
  public ModRev revConfig;
 
  @Override
  public void applyPlugin() {
+  //Inject FernflowerAccessFixer classloader
+  final ScriptHandler buildScript = project.getBuildscript();
+  final ClassLoader buildScriptCL = buildScript.getClassLoader();
+  java.util.Optional<Configuration> c = buildScript
+   .getConfigurations()
+   .parallelStream()
+   .filter(co -> co.getAllDependencies().stream().anyMatch(d -> d.getName().contains("jda")))
+   .findAny();
+
+  if (!c.isPresent()) {
+   throw new RuntimeException("JDA Library not found!");
+  }
+
+  final List<File> deps = c
+   .get()
+   .getFiles()
+   .parallelStream()
+   .filter(f -> f.getName().contains("jda"))
+   .collect(Collectors.toList());
+//  System.out.println("PLUGIN APPLY THREAD NAME: " + Thread.currentThread().getName());
+  final FernflowerAccessFixer faf = new FernflowerAccessFixer(buildScriptCL, deps);
+
   this.applyExternalPlugin("java");
   this.applyExternalPlugin("maven");
   this.applyExternalPlugin("eclipse");
@@ -101,7 +129,7 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
   hasScalaBefore = project.getPlugins().hasPlugin("scala");
   hasGroovyBefore = project.getPlugins().hasPlugin("groovy");
 
-  addGitIgnore(); //Morons -.-
+  addGitIgnore();
 
   configureDeps();
   configureCompilation();
@@ -157,7 +185,7 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
   });
 
   //TODO REVERSE ENGINEERING SECTION HERE
-  //Create modrev extension DSL
+  //Create modrev DSL extension
   revConfig = project.getExtensions().create("modrev", ModRev.class);
 
   //Add mod deobf task
@@ -179,28 +207,48 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    deobfModBinJar.setMethodCsv(revConfig.methodCsv != null ? new DelayedFile(project.file(revConfig.methodCsv)) : delayedFile(METHOD_CSV));
 //   beepboop.setInJar(delayedFile(JAR_MERGED));
    //TODO
-   deobfModBinJar.setInJar(delayedFile("{BEEP_BOOP_IN_JAR}"));
-   deobfModBinJar.setOutCleanJar(delayedFile("{API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName));
-   deobfModBinJar.setOutDirtyJar(delayedFile(DIRTY_DIR + "/" + deobfName));
+   deobfModBinJar.setInJar(delayedFile("{MOD_IN_JAR}"));
+//   deobfModBinJar.setOutCleanJar(delayedFile("{API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName));
+//   deobfModBinJar.setOutDirtyJar(delayedFile(DIRTY_DIR + "/" + deobfName));
+   deobfModBinJar.setOutCleanJar(delayedFile("{MOD_API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName));
+   deobfModBinJar.setOutDirtyJar(delayedFile("{MOD_API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName));
    deobfModBinJar.setApplyMarkers(false);
-   deobfModBinJar.setStripSynthetics(true);
+//   deobfModBinJar.setStripSynthetics(true);
+   deobfModBinJar.setStripSynthetics(false);
    configureDeobfuscation(deobfModBinJar);
    deobfModBinJar.dependsOn("downloadMcpTools", "mergeJars", "genSrgs");
 
    final DelayedFile
-    decompOut = delayedFile("{API_CACHE_DIR}/" + project.getName() + "-" + CLASSIFIER_DECOMPILED + ".jar"),
-    remapped = delayedFile("{API_CACHE_DIR}/" + project.getName() + "-remapped.jar");
-//   final DelayedFile extractedSrc = delayedFile("{BEEP_BOOP_SRC_DIR}");
+    decompOut = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-" + CLASSIFIER_DECOMPILED + ".jar"),
+    remapped = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-remapped.jar");
+//   final DelayedFile extractedSrc = delayedFile("{MOD_SRC_DIR}");
 
-   DecompileTask decompileMod = makeTask("decompileMod", DecompileTask.class);
-   decompileMod.setInJar(deobfModBinJar.getDelayedOutput());
-   decompileMod.setOutJar(decompOut);
-   decompileMod.setShouldPatch(false);
-   decompileMod.setFernFlower(delayedFile(FERNFLOWER));
-   decompileMod.setPatch(delayedFile(MCP_PATCH_DIR));
-   decompileMod.setAstyleConfig(delayedFile(ASTYLE_CFG));
-   //TODO Create separate source patching task
-//   decompileMod.setPatch();
+//   DecompileTask decompileMod = makeTask("decompileMod", DecompileTask.class);
+//   decompileMod.setInJar(deobfModBinJar.getDelayedOutput());
+//   decompileMod.setOutJar(decompOut);
+//   decompileMod.setShouldPatch(false);
+//   decompileMod.setFernFlower(delayedFile(FERNFLOWER));
+//   decompileMod.setPatch(delayedFile(MCP_PATCH_DIR));
+//   decompileMod.setAstyleConfig(delayedFile(ASTYLE_CFG));
+//   //TODO Create separate source patching task
+////   decompileMod.setPatch();
+//   decompileMod.dependsOn("downloadMcpTools", deobfModBinJar, "genSrgs");
+
+   JdaDecompileTask decompileMod = makeTask("decompileMod", JdaDecompileTask.class);
+   //TODO ensure that this works as intended
+   decompileMod.setDoesCache(true);
+   decompileMod.setClassLoader(faf);
+   decompileMod.setInput(deobfModBinJar.getDelayedOutput());
+   decompileMod.setOutput(decompOut);
+   decompileMod.setTargets(delayedString("{MOD_TARGETS}"));
+   decompileMod.addOption("din", "1");
+   decompileMod.addOption("vac", "1");
+   decompileMod.addOption("asc", "1");
+   decompileMod.addOption("rbr", "1");
+   decompileMod.addOption("rsy", "1");
+   decompileMod.addOption("dgs", "1");
+   decompileMod.addOption("ind", " ");
+   decompileMod.addOption("log", "INFO");
    decompileMod.dependsOn("downloadMcpTools", deobfModBinJar, "genSrgs");
 
    // Remap to MCP names
@@ -220,8 +268,8 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    final DelayedFile
 //    modCacheDir = delayedFile(modCacheSrc),
     //TODO use group/name/version/ as the cache dir
-    modCacheDir = delayedFile("{API_CACHE_DIR}/" + project.getName() + "-extracted"),
-    modSrcDir = delayedFile("{BEEP_BOOP_SRC_DIR}"),
+    modCacheDir = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-extracted"),
+    modSrcDir = delayedFile("{MOD_SRC_DIR}"),
     modPatchedSrcCache = delayedFile(revWorkingDir + "/patchedModSrc"),
     patchCacheDir = delayedFile(revWorkingDir + "/srcPatches"),
     patchDir = delayedFile(rootDir + "/patches");
@@ -245,36 +293,38 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    //Copy clean sources to src dir for patching
    //only if sources do not already exist
    final boolean[] cleanSourcesCopied = { false };
-   final CopyFilesTask copyExtracted = makeTask("copyExtractedModSrc", CopyFilesTask.class);
-   copyExtracted.setDoesCache(true);
-   copyExtracted.setInput(modCacheDir);
-//   copyExtracted.cacheSwitch = patchDir;
-//   copyExtracted.setOutput(modPatchedSrcCache);
-   copyExtracted.setOutput(modSrcDir);
-   copyExtracted.dependsOn(extract);
-   copyExtracted.doFirst(a -> {
+   final CopyFilesTask copyExtractedSrc = makeTask("copyExtractedModSrc", CopyFilesTask.class);
+//   copyExtractedSrc.setDoesCache(true);
+   copyExtractedSrc.setDoesCache(false);
+   copyExtractedSrc.setInput(modCacheDir);
+   copyExtractedSrc.setIncludes(delayedString("{MOD_TARGETS}"));
+//   copyExtractedSrc.cacheSwitch = patchDir;
+//   copyExtractedSrc.setOutput(modPatchedSrcCache);
+   copyExtractedSrc.setOutput(modSrcDir);
+   copyExtractedSrc.dependsOn(extract);
+   copyExtractedSrc.doFirst(a -> {
     final File srcDir = modSrcDir.call();
     if (!srcDir.exists()) {
      project.mkdir(srcDir);
     }
    });
-   copyExtracted.doLast(a -> {
+   copyExtractedSrc.doLast(a -> {
     cleanSourcesCopied[0] = true;
-    final File cache = project.file(modSrcDir.call().getAbsolutePath() + ".cache");
-    if (cache.exists()) {
-     cache.delete();
-    }
+//    final File cache = project.file(modSrcDir.call().getAbsolutePath() + ".cache");
+//    if (cache.exists()) {
+//     cache.delete();
+//    }
    });
-   copyExtracted.onlyIf(t -> {
+   copyExtractedSrc.onlyIf(t -> {
     final File srcDir = modSrcDir.call();
     return !srcDir.exists() || project.fileTree(srcDir).isEmpty();
    });
-   copyExtracted.doLast(a -> {
-    final File cache = project.file(modSrcDir.call().getAbsolutePath() + ".cache");
-    if (cache.exists()) {
-     cache.delete();
-    }
-   });
+//   copyExtractedSrc.doLast(a -> {
+//    final File cache = project.file(modSrcDir.call().getAbsolutePath() + ".cache");
+//    if (cache.exists()) {
+//     cache.delete();
+//    }
+//   });
 
    //Patch mod src
    final PatchSourcesTask patchSourcesTask = makeTask("patchModSrc", PatchSourcesTask.class);
@@ -282,7 +332,7 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 //   patchSourcesTask.setTarget(modPatchedSrcCache);
    patchSourcesTask.setTarget(modSrcDir);
    patchSourcesTask.setPatchDir(patchDir);
-   patchSourcesTask.dependsOn(copyExtracted);
+   patchSourcesTask.dependsOn(copyExtractedSrc);
    //TODO find way to run if task is specified on the commandline
 //   patchSourcesTask.onlyIf(t -> cleanSourcesCopied[0] || project.hasProperty("forcefully"));
    patchSourcesTask.onlyIf(t -> cleanSourcesCopied[0] && modSrcDir.call().exists() && patchDir.call().exists());
@@ -301,6 +351,31 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 //    }
 //   });
 
+   final DelayedFile modResDir = delayedFile("{MOD_RES_DIR}");
+   final CopyFilesTask copyExtractedResources = makeTask("copyExtractedModResources", CopyFilesTask.class);
+   copyExtractedResources.setDoesCache(false);
+   copyExtractedResources.setInput(modCacheDir);
+   copyExtractedResources.setOutput(delayedFile("{MOD_RES_DIR}"));
+   copyExtractedResources.setExcludes(delayedString("{MOD_TARGETS}"));
+   copyExtractedResources.dependsOn(copyExtractedSrc);
+   copyExtractedResources.doFirst(a -> {
+    final File resDir = modResDir.call();
+    if (!resDir.exists()) {
+     project.mkdir(resDir);
+    }
+   });
+   copyExtractedResources.doLast(a -> {
+    final File cache = project.file(modResDir.call().getAbsoluteFile() + ".cache");
+    if (cache.exists()) {
+     cache.delete();
+    }
+   });
+   copyExtractedResources.onlyIf(t -> {
+    final File resDir = modResDir.call();
+    return !resDir.exists() || project.fileTree(resDir).isEmpty();
+   });
+
+    //TODO resource patches as well (both binary and source patches)
    final GeneratePatches generatePatches = makeTask("genModPatches", GeneratePatches.class);
 //   generatePatches.setPatchDir(patchCacheDir);
    generatePatches.setPatchDir(patchDir);
@@ -311,7 +386,8 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 //   generatePatches.setOriginalPrefix("");
 //   generatePatches.setChangedPrefix("");
 //   generatePatches.dependsOn(copyPatchedSources);
-   generatePatches.dependsOn(patchSourcesTask);
+//   generatePatches.dependsOn(patchSourcesTask);
+   generatePatches.dependsOn(patchSourcesTask, copyExtractedResources);
    generatePatches.doFirst(t -> {
     final File
      cd = patchCacheDir.call(),
@@ -332,6 +408,7 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 
    final DelayedDeleteTask deleteSourcesTask = makeTask("eulaCompliance", DelayedDeleteTask.class);
    deleteSourcesTask.delete(modSrcDir);
+   deleteSourcesTask.delete(delayedFile("{MOD_RES_DIR}"));
 
    project
     .getTasks()
@@ -497,8 +574,21 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
   pattern = pattern.replace("{RUN_SERVER_TWEAKER}", prefix + getServerTweaker());
   //TODO add the rest of the properties in ModRev
   //Mod disassembly-related variables
-  pattern = pattern.replace("{BEEP_BOOP_IN_JAR}", project.file(revConfig.inJar).getAbsolutePath());
-  pattern = pattern.replace("{BEEP_BOOP_SRC_DIR}", project.file(revConfig.srcDir).getAbsolutePath());
+  pattern = pattern.replace("{MOD_API_CACHE_DIR}", getModApiCacheDir());
+  pattern = pattern.replace("{MOD_IN_JAR}", project.file(revConfig.inJar).getAbsolutePath());
+  pattern = pattern.replace("{MOD_SRC_DIR}", project.file(revConfig.srcDir).getAbsolutePath());
+  pattern = pattern.replace("{MOD_RES_DIR}", project.file(revConfig.resDir).getAbsolutePath());
+  //TODO Mod targets
+  final String[] modTargets = {""};
+  final ArrayList<String> targets = (ArrayList<String>)revConfig.targets;
+  if (targets.size() == 0) {
+   throw new RuntimeException("You must specify at least one target directory within the mod jar to be decompiled!");
+  }
+  targets.forEach(s -> modTargets[0] += s + " ");
+  //Cut trailing space from target string
+  pattern = pattern.replace("{MOD_TARGETS}", modTargets[0].substring(0, modTargets[0].length() - 1));
+  pattern = pattern.replace("{MOD_API_NAME}", getModApiName());
+  pattern = pattern.replace("{MOD_API_VERSION}", getModApiVersion());
   return pattern;
  }
 
@@ -1483,6 +1573,10 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
   return "{CACHE_DIR}/minecraft/" + getApiPath(exten) + "/{API_NAME}/{API_VERSION}";
  }
 
+ public String getModApiCacheDir() {
+  return "{CACHE_DIR}/minecraft/" + getApiGroup().replace(".", "/") + "/{MOD_API_NAME}/{MOD_API_VERSION}";
+ }
+
  protected String getSrgCacheDir(UserPatchExtension exten) {
   return "{API_CACHE_DIR}/" + UserConstants.MAPPING_APPENDAGE + "srgs";
  }
@@ -1501,6 +1595,10 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 
  protected String getApiVersion(UserPatchExtension exten) {
   return exten.getApiVersion();
+ }
+
+ public String getModApiVersion() {
+  return project.property("version").toString();
  }
 
  protected String getMcVersion(UserPatchExtension exten) {
@@ -1570,6 +1668,10 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 
  public String getApiName() {
   return "forge";
+ }
+
+ public String getModApiName() {
+  return project.property("group").toString();
  }
 
  protected String getApiGroup() {

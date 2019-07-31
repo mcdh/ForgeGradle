@@ -72,9 +72,9 @@ public class ProcessSrcJarTask extends EditJarTask
                 }
             }
             
-            if (stage.patchDir != null)
+            if (stage.patches != null)
             {
-                getLogger().lifecycle("Applying {} patchDir", stage.name);
+                getLogger().lifecycle("Applying {} patches", stage.name);
                 applyPatchStage(stage.name, stage.getPatchFiles());
             }
         }
@@ -82,12 +82,12 @@ public class ProcessSrcJarTask extends EditJarTask
 
     public void applyPatchStage(String stage, FileCollection patchFiles) throws Exception
     {
-        getLogger().info("Reading patchDir for stage {}", stage);
+        getLogger().info("Reading patches for stage {}", stage);
         ArrayList<PatchedFile> patches = readPatches(patchFiles);
 
         boolean fuzzed = false;
 
-        getLogger().info("Applying patchDir for stage {}", stage);
+        getLogger().info("Applying patches for stage {}", stage);
 
         Throwable failure = null;
 
@@ -96,7 +96,7 @@ public class ProcessSrcJarTask extends EditJarTask
             List<ContextualPatch.PatchReport> errors = patch.patch.patch(false);
             for (ContextualPatch.PatchReport report : errors)
             {
-                // catch failed patchDir
+                // catch failed patches
                 if (!report.getStatus().isSuccess())
                 {
                     File reject = patch.makeRejectFile();
@@ -129,7 +129,7 @@ public class ProcessSrcJarTask extends EditJarTask
                     if (failure == null)
                         failure = report.getFailure();
                 }
-                // catch fuzzed patchDir
+                // catch fuzzed patches
                 else if (report.getStatus() == ContextualPatch.PatchStatus.Fuzzed)
                 {
                     getLogger().log(LogLevel.INFO, "Patching fuzzed: {}", PROVIDER.strip(report.getTarget()));
@@ -151,7 +151,7 @@ public class ProcessSrcJarTask extends EditJarTask
                         failure = report.getFailure();
                 }
 
-                // sucesful patchDir
+                // sucesful patches
                 else
                 {
                     getLogger().info("Patch succeeded: {}", PROVIDER.strip(report.getTarget()));
@@ -193,7 +193,7 @@ public class ProcessSrcJarTask extends EditJarTask
 
         for (ResourceHolder holder : stages)
         {
-            if (holder.patchDir == null)
+            if (holder.patches == null)
                 continue;
             else if (col == null)
                 col = holder.getPatchFiles();
@@ -218,14 +218,14 @@ public class ProcessSrcJarTask extends EditJarTask
         return col;
     }
 
-    public void addStage(String name, DelayedFile patchDir, DelayedFile... injects)
+    public void addStage(String name, DelayedFile patches, DelayedFile... injects)
     {
-        stages.add(new ResourceHolder(name, patchDir, Arrays.asList(injects)));
+        stages.add(new ResourceHolder(name, patches, Arrays.asList(injects)));
     }
     
-    public void addStage(String name, DelayedFile patchDir)
+    public void addStage(String name, DelayedFile patches)
     {
-        stages.add(new ResourceHolder(name, patchDir));
+        stages.add(new ResourceHolder(name, patches));
     }
 
     @Override
@@ -318,26 +318,26 @@ public class ProcessSrcJarTask extends EditJarTask
     private final class ResourceHolder
     {
         final String            name;
-        final DelayedFile       patchDir;
+        final DelayedFile       patches;
         final List<DelayedFile> srcDirs;
 
-        public ResourceHolder(String name, DelayedFile patchDir, List<DelayedFile> srcDirs)
+        public ResourceHolder(String name, DelayedFile patches, List<DelayedFile> srcDirs)
         {
             this.name = name;
-            this.patchDir = patchDir;
+            this.patches = patches;
             this.srcDirs = srcDirs;
         }
         
-        public ResourceHolder(String name, DelayedFile patchDir)
+        public ResourceHolder(String name, DelayedFile patches)
         {
             this.name = name;
-            this.patchDir = patchDir;
+            this.patches = patches;
             this.srcDirs = new ArrayList<DelayedFile>(0);
         }
 
         public FileCollection getPatchFiles()
         {
-            File patch = getProject().file(patchDir);
+            File patch = getProject().file(patches);
             if (patch.isDirectory())
                 return getProject().fileTree(patch);
             else if (patch.getPath().endsWith("zip") || patch.getPath().endsWith("jar"))
