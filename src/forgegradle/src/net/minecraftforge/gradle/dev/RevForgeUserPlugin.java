@@ -10,6 +10,7 @@ import groovy.lang.Closure;
 import net.minecraftforge.gradle.common.BasePlugin;
 import net.minecraftforge.gradle.common.Constants;
 import net.minecraftforge.gradle.delayed.DelayedFile;
+import net.minecraftforge.gradle.delayed.DelayedString;
 import net.minecraftforge.gradle.json.JsonFactory;
 import net.minecraftforge.gradle.tasks.*;
 import net.minecraftforge.gradle.tasks.abstractutil.CopyFilesTask;
@@ -22,12 +23,16 @@ import net.minecraftforge.gradle.tasks.user.reobf.ReobfTask;
 import net.minecraftforge.gradle.user.UserConstants;
 import net.minecraftforge.gradle.user.patch.UserPatchExtension;
 import org.apache.maven.plugin.PluginConfigurationException;
+import org.apache.shiro.util.AntPathMatcher;
 import org.apache.tools.ant.types.Commandline;
+import org.cliffc.high_scale_lib.NonBlockingHashSet;
 import org.gradle.api.*;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.dsl.DependencyHandler;
 import org.gradle.api.execution.TaskExecutionGraph;
+import org.gradle.api.file.DuplicatesStrategy;
+import org.gradle.api.file.FileCollection;
 import org.gradle.api.initialization.dsl.ScriptHandler;
 import org.gradle.api.internal.ConventionTask;
 import org.gradle.api.internal.plugins.DslObject;
@@ -58,10 +63,13 @@ import javax.xml.transform.stream.StreamResult;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static net.minecraftforge.gradle.common.Constants.*;
 import static net.minecraftforge.gradle.user.UserConstants.*;
@@ -234,9 +242,10 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 ////   decompileMod.setPatch();
 //   decompileMod.dependsOn("downloadMcpTools", deobfModBinJar, "genSrgs");
 
+   final boolean[] decompRan = { false };
+   final Path[][] nonDecompTargets = new Path[1][];
    JdaDecompileTask decompileMod = makeTask("decompileMod", JdaDecompileTask.class);
-   //TODO ensure that this works as intended
-   decompileMod.setDoesCache(true);
+   decompileMod.setDoesCache(false);
    decompileMod.setClassLoader(faf);
    decompileMod.setInput(deobfModBinJar.getDelayedOutput());
    decompileMod.setOutput(decompOut);
@@ -250,6 +259,31 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    decompileMod.addOption("ind", " ");
    decompileMod.addOption("log", "INFO");
    decompileMod.dependsOn("downloadMcpTools", deobfModBinJar, "genSrgs");
+   decompileMod.doLast(a -> decompRan[0] = decompileMod.getProcessedTargets().size() > 0);
+   decompileMod.doLast(a -> {
+    try {
+     final List<Path> matchedTargets = decompileMod.getMatchedTargets();
+     final Path inputCachePath = decompileMod.getInputCache().toPath();
+     final Stream<Path> stream = java.nio.file.Files.walk(inputCachePath);
+     nonDecompTargets[0] = stream
+//      .parallel()
+      .map(inputCachePath::relativize)
+      .filter(p -> {
+       for (final Path matched : matchedTargets) {
+        if (matched.toString().equals(p.toString())) {
+         return false;
+        }
+       }
+       return true;
+      })
+      .map(inputCachePath::resolve)
+      .filter(p -> !p.toFile().isDirectory())
+      .toArray(Path[]::new);
+     stream.close();
+    } catch (Throwable t) {
+     throw new RuntimeException(t);
+    }
+   });
 
    // Remap to MCP names
    final boolean[] remapRan = { false };
@@ -262,11 +296,9 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    remapModJar.setDoesJavadocs(true);
    remapModJar.dependsOn(decompileMod);
    remapModJar.doLast(a -> remapRan[0] = true);
-
-//   boolean cleanSourcesExist = project.fileTree(extractedSrc.resolveDelayed()).isEmpty();
+   remapModJar.onlyIf(s -> decompRan[0]);
 
    final DelayedFile
-//    modCacheDir = delayedFile(modCacheSrc),
     //TODO use group/name/version/ as the cache dir
     modCacheDir = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-extracted"),
     modSrcDir = delayedFile("{MOD_SRC_DIR}"),
@@ -274,9 +306,7 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
     patchCacheDir = delayedFile(revWorkingDir + "/srcPatches"),
     patchDir = delayedFile(rootDir + "/patches");
 
-   final boolean
-    cleanSourcesExist = project.fileTree(modCacheSrc).isEmpty();
-//    devSourcesExist = project.fileTree(modSrcDir.resolveDelayed()).isEmpty();
+   final boolean cleanSourcesExist = project.fileTree(modCacheSrc).isEmpty();
 
    //Clean extraction
    ExtractTask extract = makeTask("extractModSrc", ExtractTask.class);
@@ -290,18 +320,38 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 //   extract.onlyIf(t -> !cleanSourcesExist);
    extract.onlyIf(a -> remapRan[0]);
 
+   //Only generate patches before copying new sources, if a new target was processed in the decompilation task
+   //This will preserve any changes that were made to previous sources before extracting new targets into the
+   //project.
+   final GeneratePatches genPatchesBeforeCleanCopy = makeTask("genPatchesBeforeCleanCopy", GeneratePatches.class);
+   genPatchesBeforeCleanCopy.setPatchDir(patchDir);
+   genPatchesBeforeCleanCopy.setOriginal(modCacheDir);
+   genPatchesBeforeCleanCopy.setChanged(modSrcDir);
+   genPatchesBeforeCleanCopy.dependsOn(extract);
+   genPatchesBeforeCleanCopy.onlyIf(s -> remapRan[0]);
+   genPatchesBeforeCleanCopy.doFirst(t -> {
+     final File
+      cd = patchCacheDir.call(),
+      pd = patchDir.call();
+     if (!cd.exists()) {
+      cd.mkdirs();
+     }
+     if (!pd.exists()) {
+      pd.mkdirs();
+     }
+    }
+   );
+
    //Copy clean sources to src dir for patching
    //only if sources do not already exist
    final boolean[] cleanSourcesCopied = { false };
    final CopyFilesTask copyExtractedSrc = makeTask("copyExtractedModSrc", CopyFilesTask.class);
-//   copyExtractedSrc.setDoesCache(true);
    copyExtractedSrc.setDoesCache(false);
    copyExtractedSrc.setInput(modCacheDir);
    copyExtractedSrc.setIncludes(delayedString("{MOD_TARGETS}"));
-//   copyExtractedSrc.cacheSwitch = patchDir;
-//   copyExtractedSrc.setOutput(modPatchedSrcCache);
    copyExtractedSrc.setOutput(modSrcDir);
-   copyExtractedSrc.dependsOn(extract);
+//   copyExtractedSrc.dependsOn(extract);
+   copyExtractedSrc.dependsOn(extract, genPatchesBeforeCleanCopy);
    copyExtractedSrc.doFirst(a -> {
     final File srcDir = modSrcDir.call();
     if (!srcDir.exists()) {
@@ -310,46 +360,19 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    });
    copyExtractedSrc.doLast(a -> {
     cleanSourcesCopied[0] = true;
-//    final File cache = project.file(modSrcDir.call().getAbsolutePath() + ".cache");
-//    if (cache.exists()) {
-//     cache.delete();
-//    }
    });
    copyExtractedSrc.onlyIf(t -> {
     final File srcDir = modSrcDir.call();
-    return !srcDir.exists() || project.fileTree(srcDir).isEmpty();
+    return !srcDir.exists() || project.fileTree(srcDir).isEmpty() || remapRan[0];
    });
-//   copyExtractedSrc.doLast(a -> {
-//    final File cache = project.file(modSrcDir.call().getAbsolutePath() + ".cache");
-//    if (cache.exists()) {
-//     cache.delete();
-//    }
-//   });
 
    //Patch mod src
    final PatchSourcesTask patchSourcesTask = makeTask("patchModSrc", PatchSourcesTask.class);
    patchSourcesTask.setDoesCache(false);
-//   patchSourcesTask.setTarget(modPatchedSrcCache);
    patchSourcesTask.setTarget(modSrcDir);
    patchSourcesTask.setPatchDir(patchDir);
    patchSourcesTask.dependsOn(copyExtractedSrc);
-   //TODO find way to run if task is specified on the commandline
-//   patchSourcesTask.onlyIf(t -> cleanSourcesCopied[0] || project.hasProperty("forcefully"));
    patchSourcesTask.onlyIf(t -> cleanSourcesCopied[0] && modSrcDir.call().exists() && patchDir.call().exists());
-
-//   //Copy patched sources
-//   final CopyFilesTask copyPatchedSources = makeTask("copyPatchedModSources", CopyFilesTask.class);
-//   copyPatchedSources.setDoesCache(false);
-//   copyPatchedSources.setInput(modPatchedSrcCache);
-//   copyPatchedSources.setOutput(modSrcDir);
-//   copyPatchedSources.dependsOn(patchSourcesTask);
-//   copyPatchedSources.onlyIf(t -> project.fileTree(modSrcDir.call()).isEmpty());
-//   copyPatchedSources.doLast(a -> {
-//    final File cache = project.file(modSrcDir.call().getAbsolutePath() + ".cache");
-//    if (cache.exists()) {
-//     cache.delete();
-//    }
-//   });
 
    final DelayedFile modResDir = delayedFile("{MOD_RES_DIR}");
    final CopyFilesTask copyExtractedResources = makeTask("copyExtractedModResources", CopyFilesTask.class);
@@ -377,16 +400,9 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 
     //TODO resource patches as well (both binary and source patches)
    final GeneratePatches generatePatches = makeTask("genModPatches", GeneratePatches.class);
-//   generatePatches.setPatchDir(patchCacheDir);
    generatePatches.setPatchDir(patchDir);
    generatePatches.setOriginal(modCacheDir);
    generatePatches.setChanged(modSrcDir);
-//   generatePatches.setOriginalPrefix("clean");
-//   generatePatches.setChangedPrefix("changed");
-//   generatePatches.setOriginalPrefix("");
-//   generatePatches.setChangedPrefix("");
-//   generatePatches.dependsOn(copyPatchedSources);
-//   generatePatches.dependsOn(patchSourcesTask);
    generatePatches.dependsOn(patchSourcesTask, copyExtractedResources);
    generatePatches.doFirst(t -> {
     final File
@@ -400,15 +416,27 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
     }
    });
 
-//   final CopyFilesTask copyPatches = makeTask("copyPatches", CopyFilesTask.class);
-//   copyPatches.setDoesCache(true);
-//   copyPatches.setInput(patchCacheDir);
-//   copyPatches.setOutput(patchDir);
-//   copyPatches.dependsOn(generatePatches);
+   final GeneratePatches genPatchesBeforeEulaCompliance = makeTask("genPatchesBeforeEulaCompliance", GeneratePatches.class);
+   genPatchesBeforeEulaCompliance.setPatchDir(patchDir);
+   genPatchesBeforeEulaCompliance.setOriginal(modCacheDir);
+   genPatchesBeforeEulaCompliance.setChanged(modSrcDir);
+   genPatchesBeforeEulaCompliance.doFirst(t -> {
+     final File
+      cd = patchCacheDir.call(),
+      pd = patchDir.call();
+     if (!cd.exists()) {
+      cd.mkdirs();
+     }
+     if (!pd.exists()) {
+      pd.mkdirs();
+     }
+    }
+   );
 
    final DelayedDeleteTask deleteSourcesTask = makeTask("eulaCompliance", DelayedDeleteTask.class);
    deleteSourcesTask.delete(modSrcDir);
    deleteSourcesTask.delete(delayedFile("{MOD_RES_DIR}"));
+   deleteSourcesTask.dependsOn(genPatchesBeforeEulaCompliance);
 
    project
     .getTasks()
@@ -420,9 +448,43 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    }
 
    //Configure javac dependencies
+//   final Path[][] toProcess = new Path[1][];
    final JavaCompile jc = (JavaCompile)project.getTasks().findByName("compileJava");
-//   jc.dependsOn(copyPatches);
    jc.dependsOn(generatePatches);
+   //TODO add all non-decompiled classes (from JdaDecompileTask) to the classpath
+   jc.doFirst(a -> {
+    final Stream<Path> stream = Arrays.stream(nonDecompTargets[0]);
+    final List<File> classpath = stream
+     .parallel()
+     .filter(p -> {
+      final String name = p.toString();
+      return name.endsWith(".class") || name.endsWith(".jar");
+     })
+     .map(p -> decompileMod.getInputCache().toPath().resolve(p).toFile())
+     .collect(Collectors.toList());
+    stream.close();
+    jc.getClasspath().add(project.files(classpath));
+   });
+
+   final Jar jarTask = (Jar)project.getTasks().findByName("jar");
+   jarTask.dependsOn(jc);
+   jarTask.setDuplicatesStrategy(DuplicatesStrategy.EXCLUDE);
+   //TODO test
+   jarTask.doFirst(a -> {
+    //the default groovy api takes eons to resolve each object type in this array...
+//    jarTask.from((Object[])nonDecompTargets[0]);
+    final Stream<File> stream = jc
+     .getOutputs()
+     .getFiles()
+     .getFiles()
+     .parallelStream();
+    final List<File> compilerOutputs = stream
+     .filter(f -> !f.getName().endsWith("dependency-cache"))
+     .collect(Collectors.toList());
+    stream.close();
+    jarTask.from(compilerOutputs);
+    jarTask.from(decompileMod.getInputCache());
+   });
 
    //Increase max compiler heap
    final CompileOptions options = jc.getOptions();
