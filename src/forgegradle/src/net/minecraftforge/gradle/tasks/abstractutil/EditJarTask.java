@@ -29,6 +29,8 @@ public abstract class EditJarTask extends CachedTask
     @Cached
     protected DelayedFile outJar;
 
+    protected boolean excludeMetaInf = true;
+
     protected HashMap<String, String> sourceMap   = new HashMap<String, String>();
     protected HashMap<String, byte[]> resourceMap = new HashMap<String, byte[]>();
 
@@ -76,9 +78,10 @@ public abstract class EditJarTask extends CachedTask
         while ((entry = zin.getNextEntry()) != null)
         {
             // no META or dirs. wel take care of dirs later.
-            if (entry.getName().contains("META-INF"))
-            {
-                continue;
+            if (excludeMetaInf) {
+                if (entry.getName().contains("META-INF")) {
+                    continue;
+                }
             }
 
             // resources or directories.
@@ -161,5 +164,13 @@ public abstract class EditJarTask extends CachedTask
     public void setSourceMap(HashMap<String, String> sourceMap)
     {
         this.sourceMap = sourceMap;
+    }
+
+    public void setExcludeMetaInf(final boolean excludeMetaInf) {
+        this.excludeMetaInf = excludeMetaInf;
+    }
+
+    public boolean getExcludeMetaInf() {
+        return excludeMetaInf;
     }
 }

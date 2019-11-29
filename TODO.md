@@ -1,0 +1,19 @@
+ - Redefine the task dependency graph to reuse existing tasks and eliminate throwaway tasks: [X]
+  - genResPatches []
+  - genSrcPatches []
+  - extractModSrc [genSrcPatches]
+  - extractModRes [genResPatches]
+  - patchModSrc [extractModSrc]
+  - patchModRes [extractModRes]
+  - compileJava [patchModSrc, patchModRes]
+  - eulaCompliance [genResPatches, genSrcPatches]
+  - clean [eulaCompliance]
+  
+- Normalize all line endings in generated and applied patches as well as in patch targets [X]
+- Fix the bug that deletes patches after a clean instead of applying them to the clean sources [X]
+- Fix the copyNonTarget tasks for resources and classes [X]
+- Fix the clean copy src and res tasks [X]
+- Fix resource patching bug [X]
+- Copy changed sources to temporary directory in case patching fails, and copy them back afterwards(maybe)
+- Add deobf jar artifact to build output
+- Only run jar and reobf if any of [compileJava, patchModRes, patchModSrc, genSrcPatches, genResPatches] ran

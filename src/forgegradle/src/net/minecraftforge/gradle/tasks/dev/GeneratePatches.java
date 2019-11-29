@@ -156,8 +156,8 @@ public class GeneratePatches extends DefaultTask
         }
 
         // We have to cache the bytes because diff reads the stream twice.. why.. who knows.
-        byte[] oData = ByteStreams.toByteArray(original);
-        byte[] cData = ByteStreams.toByteArray(changed);
+        byte[] oData = new String(ByteStreams.toByteArray(original)).replace("\r\n", "\n").getBytes();
+        byte[] cData = new String(ByteStreams.toByteArray(changed)).replace("\r\n", "\n").getBytes();
 
         Diff diff = Diff.diff(new InputStreamReader(new ByteArrayInputStream(oData), Charsets.UTF_8), new InputStreamReader(new ByteArrayInputStream(cData), Charsets.UTF_8), false);
 

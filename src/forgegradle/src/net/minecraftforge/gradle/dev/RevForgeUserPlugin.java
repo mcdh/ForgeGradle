@@ -22,17 +22,12 @@ import net.minecraftforge.gradle.tasks.user.reobf.ArtifactSpec;
 import net.minecraftforge.gradle.tasks.user.reobf.ReobfTask;
 import net.minecraftforge.gradle.user.UserConstants;
 import net.minecraftforge.gradle.user.patch.UserPatchExtension;
-import org.apache.maven.plugin.PluginConfigurationException;
-import org.apache.shiro.util.AntPathMatcher;
 import org.apache.tools.ant.types.Commandline;
-import org.cliffc.high_scale_lib.NonBlockingHashSet;
 import org.gradle.api.*;
 import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.dsl.DependencyHandler;
 import org.gradle.api.execution.TaskExecutionGraph;
 import org.gradle.api.file.DuplicatesStrategy;
-import org.gradle.api.file.FileCollection;
 import org.gradle.api.initialization.dsl.ScriptHandler;
 import org.gradle.api.internal.ConventionTask;
 import org.gradle.api.internal.plugins.DslObject;
@@ -46,7 +41,6 @@ import org.gradle.api.tasks.compile.CompileOptions;
 import org.gradle.api.tasks.compile.GroovyCompile;
 import org.gradle.api.tasks.compile.JavaCompile;
 import org.gradle.api.tasks.scala.ScalaCompile;
-import org.gradle.execution.commandline.TaskConfigurationException;
 import org.gradle.plugins.ide.idea.model.IdeaModel;
 import org.w3c.dom.DOMException;
 import org.w3c.dom.Document;
@@ -64,10 +58,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -100,35 +94,16 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
   public Object
    srcDir,
    resDir,
-   targets;
+   srcTargets,
+   srcNonTargets,
+   resTargets,
+   resNonTargets;
  }
 
  public ModRev revConfig;
 
  @Override
  public void applyPlugin() {
-  //Inject FernflowerAccessFixer classloader
-  final ScriptHandler buildScript = project.getBuildscript();
-  final ClassLoader buildScriptCL = buildScript.getClassLoader();
-  java.util.Optional<Configuration> c = buildScript
-   .getConfigurations()
-   .parallelStream()
-   .filter(co -> co.getAllDependencies().stream().anyMatch(d -> d.getName().contains("jda")))
-   .findAny();
-
-  if (!c.isPresent()) {
-   throw new RuntimeException("JDA Library not found!");
-  }
-
-  final List<File> deps = c
-   .get()
-   .getFiles()
-   .parallelStream()
-   .filter(f -> f.getName().contains("jda"))
-   .collect(Collectors.toList());
-//  System.out.println("PLUGIN APPLY THREAD NAME: " + Thread.currentThread().getName());
-  final FernflowerAccessFixer faf = new FernflowerAccessFixer(buildScriptCL, deps);
-
   this.applyExternalPlugin("java");
   this.applyExternalPlugin("maven");
   this.applyExternalPlugin("eclipse");
@@ -192,64 +167,60 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    }
   });
 
-  //TODO REVERSE ENGINEERING SECTION HERE
   //Create modrev DSL extension
   revConfig = project.getExtensions().create("modrev", ModRev.class);
 
   //Add mod deobf task
   {
+
    final String
     buildDir = project.getBuildDir().getAbsolutePath(),
     rootDir = project.getRootDir().getAbsolutePath(),
     revWorkingDir = buildDir + "/tmp/revMod",
-    modCacheSrc = revWorkingDir + "/modSrc";
+    extractionNameBase = "{MOD_API_CACHE_DIR}/" + project.getName(),
+    deobfName = project.getName() + "-deobf.jar";
 
-//   String deobfName = getBinDepName() + "-" + (hasApiVersion() ? "{API_VERSION}" : "{MC_VERSION}") + ".jar";
-   final String deobfName = project.getName() + "-deobf.jar";
+   final DelayedFile
+    deobfJar = delayedFile("{MOD_API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName),
+    resourceModCacheDir = delayedFile(extractionNameBase + "-resources"),
+    decompiledModCacheDir = delayedFile(extractionNameBase + "-decompiled"),
+    packagedDecompilerOutput = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-" + CLASSIFIER_DECOMPILED + ".jar"),
+    retainedClasses = delayedFile(buildDir + "/tmp/retainedClasses"),
+    retainedResources = delayedFile(buildDir + "/tmp/retainedResources"),
+//    backedUpSrc = delayedFile(buildDir + "/tmp/srcBackup"),
+//    backedUpRes = delayedFile(buildDir + "/tmp/resBackup"),
+    remapped = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-remapped.jar"),
+    modSrcDir = delayedFile("{MOD_SRC_DIR}"),
+    srcPatchCacheDir = delayedFile(revWorkingDir + "/srcPatches"),
+    srcPatchDir = delayedFile(rootDir + "/patches/src"),
+    modResDir = delayedFile("{MOD_RES_DIR}"),
+    resPatchCacheDir = delayedFile(revWorkingDir + "/resPatches"),
+    resPatchDir = delayedFile(rootDir + "/patches/res");
+
+   final DelayedFile deobfCache = delayedFile("{MOD_API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName + ".cache");
+   final boolean[] deobfRan = { false };
    final ProcessJarTask deobfModBinJar = makeTask("deobfModBinJar", ProcessJarTask.class);
    //TODO use delayed resolvers
-   deobfModBinJar.setSrg(revConfig.deobfMcpSrg != null ? new DelayedFile(project.file(revConfig.deobfMcpSrg)) : delayedFile(DEOBF_MCP_SRG));
-   deobfModBinJar.setExceptorJson(revConfig.excJson != null ? new DelayedFile(project.file(revConfig.excJson)) : delayedFile(EXC_JSON));
-   deobfModBinJar.setExceptorCfg(revConfig.excMcp != null ? new DelayedFile(project.file(revConfig.excMcp)) : delayedFile(EXC_MCP));
-   deobfModBinJar.setFieldCsv(revConfig.fieldCsv != null ? new DelayedFile(project.file(revConfig.fieldCsv)) : delayedFile(FIELD_CSV));
-   deobfModBinJar.setMethodCsv(revConfig.methodCsv != null ? new DelayedFile(project.file(revConfig.methodCsv)) : delayedFile(METHOD_CSV));
-//   beepboop.setInJar(delayedFile(JAR_MERGED));
-   //TODO
+   deobfModBinJar.setDoesCache(true);
+   deobfModBinJar.setSrg(delayedFile("{MOD_DEOBF_MCP_SRG}"));
+   deobfModBinJar.setExceptorJson(delayedFile("{MOD_EXC_JSON}"));
+   deobfModBinJar.setExceptorCfg(delayedFile("{MOD_EXC_MCP}"));
+   deobfModBinJar.setFieldCsv(delayedFile("{MOD_FIELD_CSV}"));
+   deobfModBinJar.setMethodCsv(delayedFile("{MOD_METHOD_CSV}"));
    deobfModBinJar.setInJar(delayedFile("{MOD_IN_JAR}"));
-//   deobfModBinJar.setOutCleanJar(delayedFile("{API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName));
-//   deobfModBinJar.setOutDirtyJar(delayedFile(DIRTY_DIR + "/" + deobfName));
-   deobfModBinJar.setOutCleanJar(delayedFile("{MOD_API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName));
-   deobfModBinJar.setOutDirtyJar(delayedFile("{MOD_API_CACHE_DIR}/" + MAPPING_APPENDAGE + deobfName));
+   deobfModBinJar.setOutCleanJar(deobfJar);
    deobfModBinJar.setApplyMarkers(false);
-//   deobfModBinJar.setStripSynthetics(true);
    deobfModBinJar.setStripSynthetics(false);
    configureDeobfuscation(deobfModBinJar);
    deobfModBinJar.dependsOn("downloadMcpTools", "mergeJars", "genSrgs");
-
-   final DelayedFile
-    decompOut = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-" + CLASSIFIER_DECOMPILED + ".jar"),
-    remapped = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-remapped.jar");
-//   final DelayedFile extractedSrc = delayedFile("{MOD_SRC_DIR}");
-
-//   DecompileTask decompileMod = makeTask("decompileMod", DecompileTask.class);
-//   decompileMod.setInJar(deobfModBinJar.getDelayedOutput());
-//   decompileMod.setOutJar(decompOut);
-//   decompileMod.setShouldPatch(false);
-//   decompileMod.setFernFlower(delayedFile(FERNFLOWER));
-//   decompileMod.setPatch(delayedFile(MCP_PATCH_DIR));
-//   decompileMod.setAstyleConfig(delayedFile(ASTYLE_CFG));
-//   //TODO Create separate source patching task
-////   decompileMod.setPatch();
-//   decompileMod.dependsOn("downloadMcpTools", deobfModBinJar, "genSrgs");
+   deobfModBinJar.doLast(a -> deobfRan[0] = true);
 
    final boolean[] decompRan = { false };
-   final Path[][] nonDecompTargets = new Path[1][];
    JdaDecompileTask decompileMod = makeTask("decompileMod", JdaDecompileTask.class);
    decompileMod.setDoesCache(false);
-   decompileMod.setClassLoader(faf);
    decompileMod.setInput(deobfModBinJar.getDelayedOutput());
-   decompileMod.setOutput(decompOut);
-   decompileMod.setTargets(delayedString("{MOD_TARGETS}"));
+   decompileMod.setOutput(packagedDecompilerOutput);
+   decompileMod.setTargets(delayedString("{MOD_SRC_TARGETS}"));
    decompileMod.addOption("din", "1");
    decompileMod.addOption("vac", "1");
    decompileMod.addOption("asc", "1");
@@ -260,183 +231,26 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    decompileMod.addOption("log", "INFO");
    decompileMod.dependsOn("downloadMcpTools", deobfModBinJar, "genSrgs");
    decompileMod.doLast(a -> decompRan[0] = decompileMod.getProcessedTargets().size() > 0);
-   decompileMod.doLast(a -> {
-    try {
-     final List<Path> matchedTargets = decompileMod.getMatchedTargets();
-     final Path inputCachePath = decompileMod.getInputCache().toPath();
-     final Stream<Path> stream = java.nio.file.Files.walk(inputCachePath);
-     nonDecompTargets[0] = stream
-//      .parallel()
-      .map(inputCachePath::relativize)
-      .filter(p -> {
-       for (final Path matched : matchedTargets) {
-        if (matched.toString().equals(p.toString())) {
-         return false;
-        }
-       }
-       return true;
-      })
-      .map(inputCachePath::resolve)
-      .filter(p -> !p.toFile().isDirectory())
-      .toArray(Path[]::new);
-     stream.close();
-    } catch (Throwable t) {
-     throw new RuntimeException(t);
-    }
-   });
 
    // Remap to MCP names
    final boolean[] remapRan = { false };
    final RemapSourcesTask remapModJar = makeTask("remapModJar", RemapSourcesTask.class);
-   remapModJar.setInJar(decompOut);
+   remapModJar.setInJar(packagedDecompilerOutput);
    remapModJar.setOutJar(remapped);
    remapModJar.setFieldsCsv(delayedFile(FIELD_CSV));
    remapModJar.setMethodsCsv(delayedFile(METHOD_CSV));
    remapModJar.setParamsCsv(delayedFile(PARAM_CSV));
    remapModJar.setDoesJavadocs(true);
+   remapModJar.setExcludeMetaInf(false);
    remapModJar.dependsOn(decompileMod);
    remapModJar.doLast(a -> remapRan[0] = true);
-   remapModJar.onlyIf(s -> decompRan[0]);
+   remapModJar.onlyIf(s -> decompRan[0] || !remapped.call().exists());
 
-   final DelayedFile
-    //TODO use group/name/version/ as the cache dir
-    modCacheDir = delayedFile("{MOD_API_CACHE_DIR}/" + project.getName() + "-extracted"),
-    modSrcDir = delayedFile("{MOD_SRC_DIR}"),
-//    modPatchedSrcCache = delayedFile(revWorkingDir + "/patchedModSrc"),
-    srcPatchCacheDir = delayedFile(revWorkingDir + "/srcPatches"),
-    srcPatchDir = delayedFile(rootDir + "/patches/src"),
-    modResDir = delayedFile("{MOD_RES_DIR}"),
-    resPatchCacheDir = delayedFile(revWorkingDir + "/resPatches"),
-    resPatchDir = delayedFile(rootDir + "/patches/res");
-
-   final boolean cleanSourcesExist = project.fileTree(modCacheSrc).isEmpty();
-
-   //Clean extraction
-   ExtractTask extract = makeTask("extractModSrc", ExtractTask.class);
-   extract.setDoesCache(true);
-   extract.from(remapped);
-   extract.into(modCacheDir);
-   extract.exclude("*package-info.java", "**/package-info.java");
-   extract.setIncludeEmptyDirs(false);
-   extract.setClean(true);
-   extract.dependsOn(remapModJar);
-//   extract.onlyIf(t -> !cleanSourcesExist);
-   extract.onlyIf(a -> remapRan[0]);
-
-   //Only generate patches before copying new sources, if a new target was processed in the decompilation task
-   //This will preserve any changes that were made to previous sources before extracting new targets into the
-   //project.
-   final GeneratePatches genSrcPatchesBeforeCleanCopy = makeTask("genSrcPatchesBeforeCleanCopy", GeneratePatches.class);
-   genSrcPatchesBeforeCleanCopy.setPatchDir(srcPatchDir);
-   genSrcPatchesBeforeCleanCopy.setOriginal(modCacheDir);
-   genSrcPatchesBeforeCleanCopy.setChanged(modSrcDir);
-   genSrcPatchesBeforeCleanCopy.dependsOn(extract);
-   genSrcPatchesBeforeCleanCopy.onlyIf(s -> remapRan[0]);
-   genSrcPatchesBeforeCleanCopy.doFirst(t -> {
-     final File
-      cd = srcPatchCacheDir.call(),
-      pd = srcPatchDir.call();
-     if (!cd.exists()) {
-      cd.mkdirs();
-     }
-     if (!pd.exists()) {
-      pd.mkdirs();
-     }
-    }
-   );
-
-   final GeneratePatches genResPatchesBeforeCleanCopy = makeTask("genResPatchesBeforeCleanCopy", GeneratePatches.class);
-   genResPatchesBeforeCleanCopy.setPatchDir(resPatchDir);
-   genResPatchesBeforeCleanCopy.setOriginal(modCacheDir);
-   genResPatchesBeforeCleanCopy.setChanged(modResDir);
-   genResPatchesBeforeCleanCopy.dependsOn(extract);
-   genResPatchesBeforeCleanCopy.onlyIf(s -> remapRan[0]);
-   genResPatchesBeforeCleanCopy.doFirst(t -> {
-     final File
-      cd = resPatchCacheDir.call(),
-      pd = resPatchDir.call();
-     if (!cd.exists()) {
-      cd.mkdirs();
-     }
-     if (!pd.exists()) {
-      pd.mkdirs();
-     }
-    }
-   );
-
-   //Copy clean sources to src dir for patching
-   //only if sources do not already exist
-   final boolean[] cleanSourcesCopied = { false };
-   final CopyFilesTask copyExtractedSrc = makeTask("copyExtractedModSrc", CopyFilesTask.class);
-   copyExtractedSrc.setDoesCache(false);
-   copyExtractedSrc.setInput(modCacheDir);
-   copyExtractedSrc.setIncludes(delayedString("{MOD_TARGETS}"));
-   copyExtractedSrc.setOutput(modSrcDir);
-//   copyExtractedSrc.dependsOn(extract);
-   copyExtractedSrc.dependsOn(extract, genSrcPatchesBeforeCleanCopy);
-   copyExtractedSrc.doFirst(a -> {
-    final File srcDir = modSrcDir.call();
-    if (!srcDir.exists()) {
-     project.mkdir(srcDir);
-    }
-   });
-   copyExtractedSrc.doLast(a -> cleanSourcesCopied[0] = true);
-   copyExtractedSrc.onlyIf(t -> {
-    final File srcDir = modSrcDir.call();
-    return !srcDir.exists() || project.fileTree(srcDir).isEmpty() || remapRan[0];
-   });
-
-   //Patch mod src
-   final PatchSourcesTask patchModSrc = makeTask("patchModSrc", PatchSourcesTask.class);
-   patchModSrc.setDoesCache(false);
-   patchModSrc.setTarget(modSrcDir);
-   patchModSrc.setPatchDir(srcPatchDir);
-   patchModSrc.dependsOn(copyExtractedSrc);
-   patchModSrc.onlyIf(t -> cleanSourcesCopied[0] && modSrcDir.call().exists() && srcPatchDir.call().exists());
-
-   //Copy clean resources
-   final boolean[] cleanResourcesCopied = { false };
-   final CopyFilesTask copyExtractedResources = makeTask("copyExtractedModResources", CopyFilesTask.class);
-   copyExtractedResources.setDoesCache(false);
-   copyExtractedResources.setInput(modCacheDir);
-   copyExtractedResources.setOutput(delayedFile("{MOD_RES_DIR}"));
-   copyExtractedResources.setExcludes(delayedString("{MOD_TARGETS}"));
-   copyExtractedResources.dependsOn(genResPatchesBeforeCleanCopy);
-   copyExtractedResources.doFirst(a -> {
-    final File resDir = modResDir.call();
-    if (!resDir.exists()) {
-     project.mkdir(resDir);
-    }
-   });
-   copyExtractedResources.doLast(a -> {
-    cleanResourcesCopied[0] = true;
-    final File cache = project.file(modResDir.call().getAbsoluteFile() + ".cache");
-    if (cache.exists()) {
-     cache.delete();
-    }
-   });
-   copyExtractedResources.onlyIf(t -> {
-    final File resDir = modResDir.call();
-    return !resDir.exists() || project.fileTree(resDir).isEmpty();
-   });
-
-   //Patch resources
-   final PatchSourcesTask patchModRes = makeTask("patchModRes", PatchSourcesTask.class);
-   patchModRes.setDoesCache(false);
-   patchModRes.setTarget(modResDir);
-   patchModRes.setPatchDir(resPatchDir);
-   patchModRes.dependsOn(copyExtractedResources);
-   patchModRes.onlyIf(t -> cleanResourcesCopied[0] && modResDir.call().exists() && resPatchDir.call().exists());
-   patchModRes.doLast(a -> {
-    System.out.println("DEBUGGER STOP POINT");
-   });
-
-    //Generate src patches
+   //Generate src patches
    final GeneratePatches genSrcPatches = makeTask("genSrcPatches", GeneratePatches.class);
    genSrcPatches.setPatchDir(srcPatchDir);
-   genSrcPatches.setOriginal(modCacheDir);
+   genSrcPatches.setOriginal(decompiledModCacheDir);
    genSrcPatches.setChanged(modSrcDir);
-   genSrcPatches.dependsOn(patchModSrc);
    genSrcPatches.doFirst(t -> {
     final File
      cd = srcPatchCacheDir.call(),
@@ -448,13 +262,13 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
      pd.mkdirs();
     }
    });
+   genSrcPatches.onlyIf(s -> decompiledModCacheDir.call().exists() && !project.fileTree(modSrcDir.call()).isEmpty());
 
    //Generate res patches
    final GeneratePatches genResPatches = makeTask("genResPatches", GeneratePatches.class);
    genResPatches.setPatchDir(resPatchDir);
-   genResPatches.setOriginal(modCacheDir);
+   genResPatches.setOriginal(resourceModCacheDir);
    genResPatches.setChanged(modResDir);
-   genResPatches.dependsOn(patchModRes);
    genResPatches.doFirst(t -> {
     final File
      cd = resPatchCacheDir.call(),
@@ -466,71 +280,136 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
      pd.mkdirs();
     }
    });
+   genResPatches.onlyIf(s -> resourceModCacheDir.call().exists());
 
-   //Generate src patches before preforming a clean
-   final GeneratePatches genSrcPatchesBeforeEulaCompliance = makeTask("genSrcPatchesBeforeEulaCompliance", GeneratePatches.class);
-   genSrcPatchesBeforeEulaCompliance.setPatchDir(srcPatchDir);
-   genSrcPatchesBeforeEulaCompliance.setOriginal(modCacheDir);
-   genSrcPatchesBeforeEulaCompliance.setChanged(modSrcDir);
-   genSrcPatchesBeforeEulaCompliance.doFirst(t -> {
-     final File
-      cd = srcPatchCacheDir.call(),
-      pd = srcPatchDir.call();
-     if (!cd.exists()) {
-      cd.mkdirs();
-     }
-     if (!pd.exists()) {
-      pd.mkdirs();
-     }
+   //Clean extraction of decompiled sources
+   final ExtractTask extract = makeTask("extractModSrc", ExtractTask.class);
+   extract.setDoesCache(true);
+   extract.from(remapped);
+   extract.into(decompiledModCacheDir);
+   extract.setIncludeEmptyDirs(false);
+   extract.setClean(true);
+   extract.dependsOn(remapModJar);
+   extract.onlyIf(a -> remapRan[0] || !decompiledModCacheDir.call().exists());
+
+   //Clean extraction of resource targets
+   final boolean[] extractModResRan = { false };
+   final CopyFilesTask extractModRes = makeTask("extractModRes", CopyFilesTask.class);
+   extractModRes.setInput(deobfJar);
+   extractModRes.setOutput(resourceModCacheDir);
+   extractModRes.setIncludes(delayedString("{MOD_RES_TARGETS}"));
+   extractModRes.setExcludes(delayedString("{MOD_RES_NON_TARGETS} *.class **/*.class"));
+   extractModRes.dependsOn(deobfModBinJar);
+   extractModRes.onlyIf(s -> deobfRan[0] || project.fileTree(resourceModCacheDir.call()).isEmpty());
+   extractModRes.doLast(a -> extractModResRan[0] = true);
+
+   //Breeder to final output jar task
+   //Cache all non-src targets
+   final CopyFilesTask cacheAllSrcNonTargets = makeTask("cacheAllSrcNonTargets", CopyFilesTask.class);
+   cacheAllSrcNonTargets.setInput(deobfJar);
+   cacheAllSrcNonTargets.setOutput(retainedClasses);
+   cacheAllSrcNonTargets.setExcludes(delayedString("{MOD_SRC_TARGETS} {MOD_RES_TARGETS}"));
+   cacheAllSrcNonTargets.setIncludes(delayedString("{MOD_SRC_NON_TARGETS} *.class **/*.class"));
+   cacheAllSrcNonTargets.dependsOn(deobfModBinJar);
+   cacheAllSrcNonTargets.doFirst(a -> {
+    final StringBuffer sb = new StringBuffer();
+    decompileMod
+     .getMatchedTargets()
+     .forEach(p -> {
+      sb.append(p.toString());
+      sb.append(" ");
+     });
+    final DelayedString excludes = delayedString(cacheAllSrcNonTargets.excludePaths.toString() + " " + sb.toString());
+    cacheAllSrcNonTargets.setExcludes(excludes);
+   });
+   cacheAllSrcNonTargets.onlyIf(t -> deobfRan[0] || project.fileTree(retainedClasses.call()).isEmpty());
+
+   final boolean[] cleanSourcesCopied = { false };
+   final CopyFilesTask copyExtractedSrc = makeTask("copyExtractedModSrc", CopyFilesTask.class);
+   copyExtractedSrc.setInput(decompiledModCacheDir);
+   copyExtractedSrc.setIncludes(delayedString("{MOD_SRC_TARGETS}"));
+   copyExtractedSrc.setOutput(modSrcDir);
+   copyExtractedSrc.dependsOn(extract, genSrcPatches);
+   copyExtractedSrc.doFirst(a -> {
+    final File srcDir = modSrcDir.call();
+    if (!srcDir.exists()) {
+     project.mkdir(srcDir);
     }
-   );
+   });
+   copyExtractedSrc.doLast(a -> cleanSourcesCopied[0] = true);
+   copyExtractedSrc.onlyIf(t -> project.fileTree(modSrcDir.call()).isEmpty() || remapRan[0]);
 
-   //Generate res patches before preforming a clean
-   final GeneratePatches genResPatchesBeforeEulaCompliance = makeTask("genResPatchesBeforeEulaCompliance", GeneratePatches.class);
-   genResPatchesBeforeEulaCompliance.setPatchDir(resPatchDir);
-   genResPatchesBeforeEulaCompliance.setOriginal(modCacheDir);
-   genResPatchesBeforeEulaCompliance.setChanged(modResDir);
-   genResPatchesBeforeEulaCompliance.doFirst(t -> {
-     final File
-      cd = resPatchCacheDir.call(),
-      pd = resPatchDir.call();
-     if (!cd.exists()) {
-      cd.mkdirs();
-     }
-     if (!pd.exists()) {
-      pd.mkdirs();
-     }
+   //Breeder to final output jar task
+   //Cache all non-resource targets
+   final CopyFilesTask cacheAllResourceNonTargets = makeTask("cacheAllResourceNonTargets", CopyFilesTask.class);
+   cacheAllResourceNonTargets.setInput(deobfJar);
+   cacheAllResourceNonTargets.setOutput(retainedResources);
+   cacheAllResourceNonTargets.setExcludes(delayedString("{MOD_RES_TARGETS} {MOD_SRC_TARGETS} *.class **/*.class"));
+   cacheAllResourceNonTargets.setIncludes(delayedString("{MOD_RES_NON_TARGETS}"));
+   cacheAllResourceNonTargets.dependsOn(deobfModBinJar);
+   cacheAllResourceNonTargets.onlyIf(s -> deobfRan[0] || project.fileTree(retainedResources.call()).isEmpty());
+
+   //Patch mod src
+   final PatchSourcesTask patchModSrc = makeTask("patchModSrc", PatchSourcesTask.class);
+   patchModSrc.setDoesCache(false);
+   patchModSrc.setTarget(modSrcDir);
+   patchModSrc.setPatchDir(srcPatchDir);
+   patchModSrc.dependsOn(copyExtractedSrc);
+   patchModSrc.onlyIf(t -> cleanSourcesCopied[0] && modSrcDir.call().exists() && srcPatchDir.call().exists());
+   patchModSrc.doLast(a -> {
+    final Throwable t = patchModSrc.hasPatchingFailed();
+    if (t != null) {
+     throw new RuntimeException(t);
     }
-   );
+   });
 
+   //Copy clean resources
+   final boolean[] cleanResourcesCopied = { false };
+   final CopyFilesTask copyExtractedResources = makeTask("copyExtractedModResources", CopyFilesTask.class);
+   copyExtractedResources.setInput(resourceModCacheDir);
+   copyExtractedResources.setOutput(modResDir);
+   copyExtractedResources.setIncludes(delayedString("{MOD_RES_TARGETS}"));
+   copyExtractedResources.setExcludes(delayedString("{MOD_RES_NON_TARGETS}"));
+   copyExtractedResources.dependsOn(extractModRes, genResPatches);
+   copyExtractedResources.doLast(a -> cleanResourcesCopied[0] = true);
+   copyExtractedResources.onlyIf(t -> project.fileTree(modResDir.call()).isEmpty() || extractModResRan[0]);
+
+   //Patch resources
+   final PatchSourcesTask patchModRes = makeTask("patchModRes", PatchSourcesTask.class);
+   patchModRes.setDoesCache(false);
+   patchModRes.setTarget(modResDir);
+   patchModRes.setPatchDir(resPatchDir);
+   patchModRes.dependsOn(copyExtractedResources);
+   patchModRes.onlyIf(t -> cleanResourcesCopied[0] && modResDir.call().exists() && resPatchDir.call().exists());
+   patchModRes.doLast(a -> {
+    final Throwable t = patchModRes.hasPatchingFailed();
+    if (t != null) {
+     throw new RuntimeException(t);
+    }
+   });
+
+   //TODO only delete files that are present in the original deobf jar
    final DelayedDeleteTask deleteSourcesTask = makeTask("eulaCompliance", DelayedDeleteTask.class);
    deleteSourcesTask.delete(modSrcDir);
    deleteSourcesTask.delete(modResDir);
-   deleteSourcesTask.dependsOn(genSrcPatchesBeforeEulaCompliance, genResPatchesBeforeEulaCompliance);
+   deleteSourcesTask.dependsOn(genSrcPatches, genResPatches);
 
    project
     .getTasks()
     .getByName("clean")
     .dependsOn(deleteSourcesTask);
 
-   if (!cleanSourcesExist) {
-
-   }
-
    //Configure javac dependencies
-//   final Path[][] toProcess = new Path[1][];
    final JavaCompile jc = (JavaCompile)project.getTasks().findByName("compileJava");
-   jc.dependsOn(genSrcPatches, genResPatches);
-   //TODO add all non-decompiled classes (from JdaDecompileTask) to the classpath
+   jc.dependsOn(genSrcPatches, genResPatches, patchModSrc, patchModRes);
    jc.doFirst(a -> {
-    final Stream<Path> stream = Arrays.stream(nonDecompTargets[0]);
+    final Stream<Path> stream = decompileMod.getMatchedTargets().parallelStream();
     final List<File> classpath = stream
-     .parallel()
      .filter(p -> {
       final String name = p.toString();
       return name.endsWith(".class") || name.endsWith(".jar");
      })
-     .map(p -> decompileMod.getInputCache().toPath().resolve(p).toFile())
+     .map(Path::toFile)
      .collect(Collectors.toList());
     stream.close();
     classpath.add(project.file(delayedString("{MOD_IN_JAR}")));
@@ -538,12 +417,10 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
    });
 
    final Jar jarTask = (Jar)project.getTasks().findByName("jar");
-   jarTask.dependsOn(jc);
+   jarTask.dependsOn(jc, cacheAllSrcNonTargets, cacheAllResourceNonTargets);
    jarTask.setDuplicatesStrategy(DuplicatesStrategy.EXCLUDE);
-   //TODO test
    jarTask.doFirst(a -> {
     //the default groovy api takes eons to resolve each object type in this array...
-//    jarTask.from((Object[])nonDecompTargets[0]);
     final Stream<File> stream = jc
      .getOutputs()
      .getFiles()
@@ -554,7 +431,9 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
      .collect(Collectors.toList());
     stream.close();
     jarTask.from(compilerOutputs);
-    jarTask.from(decompileMod.getInputCache());
+    jarTask.from(retainedClasses);
+    jarTask.from(retainedResources);
+    jarTask.from(modResDir);
    });
 
    //Increase max compiler heap
@@ -683,6 +562,12 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
 
  @Override
  public String resolve(String pattern, Project project, UserPatchExtension exten) {
+  //Mod disassembly-related variables
+  pattern = pattern.replace("{MOD_DEOBF_MCP_SRG}", revConfig.deobfMcpSrg == null ? DEOBF_MCP_SRG : project.file(revConfig.deobfMcpSrg).getAbsolutePath());
+  pattern = pattern.replace("{MOD_EXC_JSON}", revConfig.excJson == null ? EXC_JSON : project.file(revConfig.excJson).getAbsolutePath());
+  pattern = pattern.replace("{MOD_EXC_MCP}", revConfig.excJson == null ? EXC_MCP : project.file(revConfig.excMcp).getAbsolutePath());
+  pattern = pattern.replace("{MOD_FIELD_CSV}", revConfig.fieldCsv == null ? FIELD_CSV : project.file(revConfig.fieldCsv).getAbsolutePath());
+  pattern = pattern.replace("{MOD_METHOD_CSV}", revConfig.methodCsv == null ? METHOD_CSV : project.file(revConfig.methodCsv).getAbsolutePath());
   pattern = super.resolve(pattern, project, exten);
 
   pattern = pattern.replace("{MCP_DATA_DIR}", CONF_DIR);
@@ -710,21 +595,45 @@ public class RevForgeUserPlugin extends BasePlugin<UserPatchExtension> {
   String prefix = getMcVersion(exten).startsWith("1.8") ? "net.minecraftforge." : "cpw.mods.";
   pattern = pattern.replace("{RUN_CLIENT_TWEAKER}", prefix + getClientTweaker());
   pattern = pattern.replace("{RUN_SERVER_TWEAKER}", prefix + getServerTweaker());
-  //TODO add the rest of the properties in ModRev
   //Mod disassembly-related variables
   pattern = pattern.replace("{MOD_API_CACHE_DIR}", getModApiCacheDir());
   pattern = pattern.replace("{MOD_IN_JAR}", project.file(revConfig.inJar).getAbsolutePath());
   pattern = pattern.replace("{MOD_SRC_DIR}", project.file(revConfig.srcDir).getAbsolutePath());
   pattern = pattern.replace("{MOD_RES_DIR}", project.file(revConfig.resDir).getAbsolutePath());
-  //TODO Mod targets
-  final String[] modTargets = {""};
-  final ArrayList<String> targets = (ArrayList<String>)revConfig.targets;
-  if (targets.size() == 0) {
+  final String[]
+   srcTargets = {""},
+   srcNonTargets = {""},
+   resTargets = {""},
+   resNonTargets = {""};
+  ArrayList<String> al = (ArrayList<String>)revConfig.srcTargets;
+  if (al.size() == 0) {
    throw new RuntimeException("You must specify at least one target directory within the mod jar to be decompiled!");
   }
-  targets.forEach(s -> modTargets[0] += s + " ");
-  //Cut trailing space from target string
-  pattern = pattern.replace("{MOD_TARGETS}", modTargets[0].substring(0, modTargets[0].length() - 1));
+  al.forEach(s -> srcTargets[0] += s + " ");
+  srcTargets[0] = srcTargets[0].substring(0, srcTargets[0].length() - 1);
+  al = (ArrayList<String>)revConfig.srcNonTargets;
+  if (al == null) al = new ArrayList<>();
+  if (al.size() > 0) {
+   al.forEach(s -> srcNonTargets[0] += s + " ");
+   srcNonTargets[0] = srcNonTargets[0].substring(0, srcNonTargets[0].length() - 1);
+  }
+  al = (ArrayList<String>)revConfig.resTargets;
+  if (al == null) al = new ArrayList<>();
+  if (al.size() > 0) {
+   al.forEach(s -> resTargets[0] += s + " ");
+   resTargets[0] = resTargets[0].substring(0, resTargets[0].length() - 1);
+  }
+  al = (ArrayList<String>)revConfig.resNonTargets;
+  if (al == null) al = new ArrayList<>();
+  if (al.size() > 0) {
+   al.forEach(s -> resNonTargets[0] += s + " ");
+   resNonTargets[0] = resNonTargets[0].substring(0, resNonTargets[0].length() - 1);
+  }
+
+  pattern = pattern.replace("{MOD_SRC_TARGETS}", srcTargets[0]);
+  pattern = pattern.replace("{MOD_SRC_NON_TARGETS}", srcNonTargets[0]);
+  pattern = pattern.replace("{MOD_RES_TARGETS}", resTargets[0]);
+  pattern = pattern.replace("{MOD_RES_NON_TARGETS}", resNonTargets[0]);
   pattern = pattern.replace("{MOD_API_NAME}", getModApiName());
   pattern = pattern.replace("{MOD_API_VERSION}", getModApiVersion());
   return pattern;

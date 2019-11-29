@@ -29,8 +29,7 @@ public class PatchSourcesTask extends CachedTask implements ContextualPatch.ICon
     this.fileToPatch = file;
     this.patch = ContextualPatch
      .create(Files.toString(file, Charset.defaultCharset()), PatchSourcesTask.this)
-//     .create(Files.toString(file, Charset.defaultCharset()), null)
-     .setAccessC14N(true)
+     .setAccessC14N(false)
      .setMaxFuzz(PatchSourcesTask.this.maxFuzz);
    } catch (final Throwable t) {
     throw new TaskExecutionException(PatchSourcesTask.this, t);
@@ -55,15 +54,31 @@ public class PatchSourcesTask extends CachedTask implements ContextualPatch.ICon
  private final Project project = getProject();
  private final Logger logger = getLogger();
  private final Map<String, String> sourceMap = new NonBlockingHashMap<>();
+ private Throwable failure = null;
 
  @Override
  public List<String> getData(String target) {
-  if (sourceMap.containsKey(target)) {
+  String value = sourceMap.get(target);
+  if (value == null) {
+   final File patchTarget = this.target
+    .call()
+    .toPath()
+    .resolve(target)
+    .toFile();
+
+   if (patchTarget.exists() && patchTarget.isFile()) {
+    try {
+     value = Files
+      .toString(patchTarget, Charset.defaultCharset())
+      .replace("\r\n", "\n");
+    } catch (final Throwable t) {
+     throw new RuntimeException(t);
+    }
+   }
+  }
+  if (value != null) {
    final ArrayList<String> data = new ArrayList<>();
-   Collections.addAll(data, sourceMap.get(target).split("\r\n|\r|\n"));
-//   for (final String line : sourceMap.get(target).split("\r\n|\r|\n")) {
-//    data.add(line);
-//   }
+   Collections.addAll(data, value.split("\n", -1));
    return data;
   }
   return null;
@@ -97,27 +112,6 @@ public class PatchSourcesTask extends CachedTask implements ContextualPatch.ICon
 
     //Process file output file or directory
     if (target.isDirectory()) {
-     //TODO Change so that getData retrieves the file contents upon invocation rather than loading all sources
-     // into memory at the beginning of the task
-     project
-      .fileTree(target)
-      .getFiles()
-      .parallelStream()
-      .forEach(f -> {
-       try {
-        if (f.getName().endsWith(".java")) {
-         final String path = f
-//          .getAbsolutePath()
-          .getCanonicalPath()
-          .substring(target.getCanonicalPath().length() + 1)
-          .replace('\\', '/');
-//         System.out.println("ADDING TARGET FILE: " + path);
-         sourceMap.put(path, Files.toString(f, Charset.defaultCharset()));
-        }
-       } catch (final Throwable t) {
-        throw new TaskExecutionException(PatchSourcesTask.this, t);
-       }
-      });
      patchDirectory(patchDir);
      sourceMap
       .entrySet()
@@ -139,12 +133,11 @@ public class PatchSourcesTask extends CachedTask implements ContextualPatch.ICon
      throw new RuntimeException("This task does not support patching archives yet.");
     }
    } catch (final Throwable t) {
-    throw new TaskExecutionException(this, t);
+    failure = t;
    }
   }
  }
 
-// public void patchDirectory(final File directory, final File patchDir) {
  //TODO use separate PrintStreams for each thread to properly serialize stdout writes
  public void patchDirectory(final File patchDir) {
   final boolean[] fuzzed = { false };
@@ -237,5 +230,9 @@ public class PatchSourcesTask extends CachedTask implements ContextualPatch.ICon
 
  public void setPatchDir(final DelayedFile patchDir) {
   this.patchDir = patchDir;
+ }
+
+ public Throwable hasPatchingFailed() {
+  return failure;
  }
 }
